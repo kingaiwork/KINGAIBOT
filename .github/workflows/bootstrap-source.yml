@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/bootstrap-source.yml'
+  workflow_dispatch:
 
 permissions:
   contents: write
