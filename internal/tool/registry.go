@@ -201,11 +201,7 @@ func (r *Registry) fileRead(raw json.RawMessage) (string, error) {
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return "", err
 	}
-	p, err := secureExisting(a.Path, r.cfg.Security.FileReadRoots)
-	if err != nil {
-		return "", err
-	}
-	f, err := os.Open(p)
+	f, err := storage.OpenAllowedFile(a.Path, r.cfg.Security.FileReadRoots)
 	if err != nil {
 		return "", err
 	}
@@ -231,18 +227,7 @@ func (r *Registry) fileWrite(raw json.RawMessage) (string, error) {
 	if len(a.Content) > 2<<20 {
 		return "", errors.New("content exceeds 2 MiB limit")
 	}
-	p, err := secureWritable(a.Path, r.cfg.Security.FileWriteRoots)
-	if err != nil {
-		return "", err
-	}
-	if err = os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return "", err
-	}
-	p, err = secureWritable(p, r.cfg.Security.FileWriteRoots)
-	if err != nil {
-		return "", err
-	}
-	if err = storage.AtomicWriteFile(p, []byte(a.Content), 0o600); err != nil {
+	if err := storage.AtomicWriteAllowedFile(a.Path, r.cfg.Security.FileWriteRoots, []byte(a.Content), 0o600); err != nil {
 		return "", err
 	}
 	return `{"ok":true}`, nil
@@ -268,6 +253,9 @@ func (r *Registry) httpGet(ctx context.Context, raw json.RawMessage) (string, er
 	if u.Hostname() == "" {
 		return "", errors.New("URL hostname required")
 	}
+	if port := u.Port(); port != "" && port != "443" {
+		return "", errors.New("http_get permits only the standard HTTPS port")
+	}
 	if !hostAllowed(u.Hostname(), r.cfg.Security.HTTPAllowedHosts) {
 		return "", errors.New("host not in allowlist")
 	}
@@ -279,6 +267,12 @@ func (r *Registry) httpGet(ctx context.Context, raw json.RawMessage) (string, er
 		if req.URL.User != nil {
 			return errors.New("redirect URL credentials denied")
 		}
+		if req.URL.Scheme != "https" {
+			return errors.New("redirect protocol downgrade denied")
+		}
+		if port := req.URL.Port(); port != "" && port != "443" {
+			return errors.New("redirect non-standard HTTPS port denied")
+		}
 		if !hostAllowed(req.URL.Hostname(), r.cfg.Security.HTTPAllowedHosts) {
 			return errors.New("redirect host denied")
 		}
@@ -288,7 +282,7 @@ func (r *Registry) httpGet(ctx context.Context, raw json.RawMessage) (string, er
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "KING-Agent-OS/1.1")
+	req.Header.Set("User-Agent", "KINGAIBOT/1.2")
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -395,6 +389,7 @@ func (r *Registry) remoteRPC(ctx context.Context, ep config.RemoteEndpoint, prot
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := netguard.Client(60*time.Second, ep.AllowPrivateNetwork)
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
