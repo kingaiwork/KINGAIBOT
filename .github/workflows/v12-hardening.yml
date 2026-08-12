@@ -1,0 +1,191 @@
+name: KINGAIBOT V1.2 one-shot hardening
+
+on:
+  push:
+    branches: [agent/v1.2-security-expansion]
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.repository == 'kingaiwork/KINGAIBOT' && github.ref == 'refs/heads/agent/v1.2-security-expansion'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: true
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.5'
+          cache: false
+      - name: Apply V1.2 security migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          # Production baseline: the source now uses os.Root security APIs added
+          # after the repository's original Go 1.23 language baseline.
+          p = Path('go.mod')
+          s = p.read_text()
+          s = re.sub(r'(?m)^go\s+[^\n]+$', 'go 1.26.5', s, count=1)
+          p.write_text(s)
+
+          # Replace file tools with os.Root-backed storage operations. Keep the
+          # older lexical helpers temporarily for compatibility tests, but they
+          # are no longer on the execution path for file_read/file_write.
+          p = Path('internal/tool/registry.go')
+          s = p.read_text()
+          start = s.index('func (r *Registry) fileRead(')
+          middle = s.index('func (r *Registry) fileWrite(', start)
+          end = s.index('func (r *Registry) httpGet(', middle)
+          file_read = r'''func (r *Registry) fileRead(raw json.RawMessage) (string, error) {
+	var a struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", err
+	}
+	f, err := storage.OpenAllowedFile(a.Path, r.cfg.Security.FileReadRoots)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, (2<<20)+1))
+	if err != nil {
+		return "", err
+	}
+	if len(b) > 2<<20 {
+		return "", errors.New("file exceeds 2 MiB limit")
+	}
+	return string(b), nil
+}
+
+'''
+          file_write = r'''func (r *Registry) fileWrite(raw json.RawMessage) (string, error) {
+	var a struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", err
+	}
+	if len(a.Content) > 2<<20 {
+		return "", errors.New("content exceeds 2 MiB limit")
+	}
+	if err := storage.AtomicWriteAllowedFile(a.Path, r.cfg.Security.FileWriteRoots, []byte(a.Content), 0o600); err != nil {
+		return "", err
+	}
+	return `{"ok":true}`, nil
+}
+
+'''
+          s = s[:start] + file_read + file_write + s[end:]
+
+          # Generic HTTP tool: initial request was HTTPS-only, but redirects also
+          # need to preserve HTTPS, approved host and standard TLS port.
+          old = '''\tif u.Hostname() == "" {\n\t\treturn "", errors.New("URL hostname required")\n\t}\n\tif !hostAllowed(u.Hostname(), r.cfg.Security.HTTPAllowedHosts) {'''
+          new = '''\tif u.Hostname() == "" {\n\t\treturn "", errors.New("URL hostname required")\n\t}\n\tif port := u.Port(); port != "" && port != "443" {\n\t\treturn "", errors.New("http_get permits only the standard HTTPS port")\n\t}\n\tif !hostAllowed(u.Hostname(), r.cfg.Security.HTTPAllowedHosts) {'''
+          if old not in s:
+              raise SystemExit('http initial validation patch target not found')
+          s = s.replace(old, new, 1)
+          old = '''\tclient.CheckRedirect = func(req *http.Request, via []*http.Request) error {\n\t\tif len(via) >= 5 {\n\t\t\treturn errors.New("too many redirects")\n\t\t}\n\t\tif req.URL.User != nil {\n\t\t\treturn errors.New("redirect URL credentials denied")\n\t\t}\n\t\tif !hostAllowed(req.URL.Hostname(), r.cfg.Security.HTTPAllowedHosts) {\n\t\t\treturn errors.New("redirect host denied")\n\t\t}\n\t\treturn nil\n\t}'''
+          new = '''\tclient.CheckRedirect = func(req *http.Request, via []*http.Request) error {\n\t\tif len(via) >= 5 {\n\t\t\treturn errors.New("too many redirects")\n\t\t}\n\t\tif req.URL.User != nil {\n\t\t\treturn errors.New("redirect URL credentials denied")\n\t\t}\n\t\tif req.URL.Scheme != "https" {\n\t\t\treturn errors.New("redirect protocol downgrade denied")\n\t\t}\n\t\tif port := req.URL.Port(); port != "" && port != "443" {\n\t\t\treturn errors.New("redirect non-standard HTTPS port denied")\n\t\t}\n\t\tif !hostAllowed(req.URL.Hostname(), r.cfg.Security.HTTPAllowedHosts) {\n\t\t\treturn errors.New("redirect host denied")\n\t\t}\n\t\treturn nil\n\t}'''
+          if old not in s:
+              raise SystemExit('redirect validation patch target not found')
+          s = s.replace(old, new, 1)
+
+          # Remote MCP/A2A endpoints are admin-configured and authenticated. Do
+          # not follow redirects so bearer credentials never cross origins.
+          old = '''\tclient := netguard.Client(60*time.Second, ep.AllowPrivateNetwork)\n\tresp, err := client.Do(req)'''
+          new = '''\tclient := netguard.Client(60*time.Second, ep.AllowPrivateNetwork)\n\tclient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }\n\tresp, err := client.Do(req)'''
+          if old not in s:
+              raise SystemExit('remote RPC client patch target not found')
+          s = s.replace(old, new, 1)
+          s = s.replace('KING-Agent-OS/1.1', 'KINGAIBOT/1.2')
+          p.write_text(s)
+
+          # Model provider API keys must never be forwarded through redirects.
+          p = Path('internal/provider/openai.go')
+          s = p.read_text()
+          old = '''\tclient := netguard.Client(c.timeout, p.AllowPrivateNetwork)\n\tresp, err := client.Do(req)'''
+          new = '''\tclient := netguard.Client(c.timeout, p.AllowPrivateNetwork)\n\tclient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }\n\tresp, err := client.Do(req)'''
+          if old not in s:
+              raise SystemExit('provider redirect patch target not found')
+          s = s.replace(old, new, 1)
+          s = s.replace('KING-Agent-OS/1.1', 'KINGAIBOT/1.2')
+          p.write_text(s)
+
+          # Configuration validation: a global HTTP wildcard defeats destination
+          # least privilege. Subdomain wildcards remain available explicitly.
+          p = Path('internal/config/config.go')
+          s = p.read_text()
+          needle = '''\tfor i := range c.Security.FileWriteRoots {\n\t\tc.Security.FileWriteRoots[i] = abs(base, c.Security.FileWriteRoots[i])\n\t}\n'''
+          insert = needle + '''\tfor _, host := range c.Security.HTTPAllowedHosts {\n\t\thost = strings.TrimSpace(host)\n\t\tif host == "*" {\n\t\t\treturn errors.New("security.http_allowed_hosts does not permit a global wildcard")\n\t\t}\n\t\tif host == "" || strings.ContainsAny(host, "/@?#") {\n\t\t\treturn fmt.Errorf("invalid HTTP allowed host %q", host)\n\t\t}\n\t}\n\tfor _, command := range c.Security.ShellAllowlist {\n\t\tif command == "" || command != filepath.Base(command) || strings.ContainsAny(command, "/\\\\\\x00") || len(command) > 128 {\n\t\t\treturn fmt.Errorf("invalid shell allowlist command %q; only bare command names are allowed", command)\n\t\t}\n\t}\n'''
+          if needle not in s:
+              raise SystemExit('config security validation patch target not found')
+          s = s.replace(needle, insert, 1)
+          p.write_text(s)
+
+          # Example configuration and product version.
+          p = Path('configs/config.example.json')
+          s = p.read_text().replace('"version": "1.1.0"', '"version": "1.2.0"', 1)
+          p.write_text(s)
+
+          # Append execution-path tests for the new os.Root-backed file tools.
+          p = Path('internal/tool/registry_test.go')
+          s = p.read_text()
+          if 'TestFileToolRejectsSymlinkEscapeWithOSRoot' not in s:
+              s += r'''
+
+func TestFileToolRejectsSymlinkEscapeWithOSRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation permissions vary on Windows")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "escape")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Security: config.Security{FileReadRoots: []string{root}, FileWriteRoots: []string{root}}}
+	reg := New(cfg, nil, nil, nil)
+	readArgs, _ := json.Marshal(map[string]any{"path": link})
+	if _, err := reg.fileRead(readArgs); err == nil {
+		t.Fatal("expected read through escaping symlink to be rejected")
+	}
+	writeArgs, _ := json.Marshal(map[string]any{"path": filepath.Join(root, "escape", "pwned.txt"), "content": "blocked"})
+	if _, err := reg.fileWrite(writeArgs); err == nil {
+		t.Fatal("expected write through escaping symlink to be rejected")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "pwned.txt")); !os.IsNotExist(err) {
+		t.Fatalf("outside file unexpectedly created: %v", err)
+	}
+}
+'''
+          p.write_text(s)
+          PY
+
+          gofmt -w .
+          test -z "$(gofmt -l .)"
+          go test -count=1 ./...
+          go vet ./...
+          go test -race -count=1 ./...
+
+      - name: Commit validated hardening and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/v12-hardening.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Harden file sandbox, redirects, and security policy for V1.2'
+          git push origin HEAD:agent/v1.2-security-expansion
