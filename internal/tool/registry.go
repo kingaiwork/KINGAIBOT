@@ -195,142 +195,274 @@ func (r *Registry) systemInfo() (string, error) {
 }
 
 func (r *Registry) fileRead(raw json.RawMessage) (string, error) {
-	var a struct{ Path string `json:"path"` }
-	if err := json.Unmarshal(raw, &a); err != nil { return "", err }
+	var a struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", err
+	}
 	p, err := secureExisting(a.Path, r.cfg.Security.FileReadRoots)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	f, err := os.Open(p)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	defer f.Close()
 	b, err := io.ReadAll(io.LimitReader(f, (2<<20)+1))
-	if err != nil { return "", err }
-	if len(b) > 2<<20 { return "", errors.New("file exceeds 2 MiB limit") }
+	if err != nil {
+		return "", err
+	}
+	if len(b) > 2<<20 {
+		return "", errors.New("file exceeds 2 MiB limit")
+	}
 	return string(b), nil
 }
 
 func (r *Registry) fileWrite(raw json.RawMessage) (string, error) {
-	var a struct { Path string `json:"path"`; Content string `json:"content"` }
-	if err := json.Unmarshal(raw, &a); err != nil { return "", err }
-	if len(a.Content) > 2<<20 { return "", errors.New("content exceeds 2 MiB limit") }
+	var a struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", err
+	}
+	if len(a.Content) > 2<<20 {
+		return "", errors.New("content exceeds 2 MiB limit")
+	}
 	p, err := secureWritable(a.Path, r.cfg.Security.FileWriteRoots)
-	if err != nil { return "", err }
-	if err = os.MkdirAll(filepath.Dir(p), 0o700); err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
+	if err = os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return "", err
+	}
 	p, err = secureWritable(p, r.cfg.Security.FileWriteRoots)
-	if err != nil { return "", err }
-	if err = storage.AtomicWriteFile(p, []byte(a.Content), 0o600); err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
+	if err = storage.AtomicWriteFile(p, []byte(a.Content), 0o600); err != nil {
+		return "", err
+	}
 	return `{"ok":true}`, nil
 }
 
 func (r *Registry) httpGet(ctx context.Context, raw json.RawMessage) (string, error) {
-	var a struct{ URL string `json:"url"` }
-	if err := json.Unmarshal(raw, &a); err != nil { return "", err }
+	var a struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", err
+	}
 	u, err := url.Parse(a.URL)
-	if err != nil { return "", err }
-	if u.User != nil { return "", errors.New("credentials in URL are not allowed") }
-	if u.Scheme != "https" { return "", errors.New("http_get requires https") }
-	if u.Hostname() == "" { return "", errors.New("URL hostname required") }
-	if !hostAllowed(u.Hostname(), r.cfg.Security.HTTPAllowedHosts) { return "", errors.New("host not in allowlist") }
+	if err != nil {
+		return "", err
+	}
+	if u.User != nil {
+		return "", errors.New("credentials in URL are not allowed")
+	}
+	if u.Scheme != "https" {
+		return "", errors.New("http_get requires https")
+	}
+	if u.Hostname() == "" {
+		return "", errors.New("URL hostname required")
+	}
+	if !hostAllowed(u.Hostname(), r.cfg.Security.HTTPAllowedHosts) {
+		return "", errors.New("host not in allowlist")
+	}
 	client := netguard.Client(30*time.Second, r.cfg.Security.AllowPrivateNetwork)
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 5 { return errors.New("too many redirects") }
-		if req.URL.User != nil { return errors.New("redirect URL credentials denied") }
-		if !hostAllowed(req.URL.Hostname(), r.cfg.Security.HTTPAllowedHosts) { return errors.New("redirect host denied") }
+		if len(via) >= 5 {
+			return errors.New("too many redirects")
+		}
+		if req.URL.User != nil {
+			return errors.New("redirect URL credentials denied")
+		}
+		if !hostAllowed(req.URL.Hostname(), r.cfg.Security.HTTPAllowedHosts) {
+			return errors.New("redirect host denied")
+		}
 		return nil
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	req.Header.Set("User-Agent", "KING-Agent-OS/1.1")
 	resp, err := client.Do(req)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, (2<<20)+1))
-	if err != nil { return "", err }
-	if len(b) > 2<<20 { return "", errors.New("HTTP response exceeds 2 MiB limit") }
+	if err != nil {
+		return "", err
+	}
+	if len(b) > 2<<20 {
+		return "", errors.New("HTTP response exceeds 2 MiB limit")
+	}
 	return fmt.Sprintf("status=%d\n%s", resp.StatusCode, string(b)), nil
 }
 
 func (r *Registry) shell(ctx context.Context, raw json.RawMessage) (string, error) {
-	var a struct { Argv []string `json:"argv"`; Timeout int `json:"timeout_seconds"` }
-	if err := json.Unmarshal(raw, &a); err != nil { return "", err }
-	if len(a.Argv) == 0 { return "", errors.New("argv required") }
-	if len(a.Argv) > 64 { return "", errors.New("too many argv items") }
-	for _, arg := range a.Argv { if strings.IndexByte(arg, 0) >= 0 { return "", errors.New("NUL byte in argv denied") } }
+	var a struct {
+		Argv    []string `json:"argv"`
+		Timeout int      `json:"timeout_seconds"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", err
+	}
+	if len(a.Argv) == 0 {
+		return "", errors.New("argv required")
+	}
+	if len(a.Argv) > 64 {
+		return "", errors.New("too many argv items")
+	}
+	for _, arg := range a.Argv {
+		if strings.IndexByte(arg, 0) >= 0 {
+			return "", errors.New("NUL byte in argv denied")
+		}
+	}
 	cmdName := filepath.Base(a.Argv[0])
-	if a.Argv[0] != cmdName { return "", errors.New("shell executable must be an allow-listed bare command name; paths are denied") }
+	if a.Argv[0] != cmdName {
+		return "", errors.New("shell executable must be an allow-listed bare command name; paths are denied")
+	}
 	ok := false
-	for _, x := range r.cfg.Security.ShellAllowlist { if cmdName == x { ok = true; break } }
-	if !ok { return "", errors.New("binary not in shell allowlist") }
-	if a.Timeout <= 0 { a.Timeout = 30 }
-	if a.Timeout > 120 { a.Timeout = 120 }
+	for _, x := range r.cfg.Security.ShellAllowlist {
+		if cmdName == x {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return "", errors.New("binary not in shell allowlist")
+	}
+	if a.Timeout <= 0 {
+		a.Timeout = 30
+	}
+	if a.Timeout > 120 {
+		a.Timeout = 120
+	}
 	cctx, cancel := context.WithTimeout(ctx, time.Duration(a.Timeout)*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, a.Argv[0], a.Argv[1:]...)
 	cmd.Dir = r.cfg.Runtime.WorkspaceDir
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + r.cfg.Runtime.WorkspaceDir, "LANG=C.UTF-8", "LC_ALL=C.UTF-8"}
 	out, err := cmd.CombinedOutput()
-	if len(out) > 1<<20 { out = out[:1<<20] }
-	if err != nil { return string(out), fmt.Errorf("command failed: %w", err) }
+	if len(out) > 1<<20 {
+		out = out[:1<<20]
+	}
+	if err != nil {
+		return string(out), fmt.Errorf("command failed: %w", err)
+	}
 	return string(out), nil
 }
 
 func (r *Registry) endpoint(name string, list []config.RemoteEndpoint) (config.RemoteEndpoint, error) {
-	for _, ep := range list { if ep.Enabled && ep.Name == name { return ep, nil } }
+	for _, ep := range list {
+		if ep.Enabled && ep.Name == name {
+			return ep, nil
+		}
+	}
 	return config.RemoteEndpoint{}, errors.New("remote endpoint is not configured or enabled")
 }
 
 func (r *Registry) remoteRPC(ctx context.Context, ep config.RemoteEndpoint, protocol, method, methodName string, params any) (string, error) {
 	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": time.Now().UnixNano(), "method": method, "params": params})
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.URL, bytes.NewReader(body))
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	req.Header.Set("Content-Type", "application/json")
 	switch protocol {
 	case "mcp":
 		req.Header.Set("MCP-Protocol-Version", "2026-07-28")
 		req.Header.Set("Mcp-Method", method)
-		if methodName != "" { req.Header.Set("Mcp-Name", methodName) }
+		if methodName != "" {
+			req.Header.Set("Mcp-Name", methodName)
+		}
 	case "a2a":
 		req.Header.Set("A2A-Version", "1.0")
 	}
 	if ep.BearerTokenEnv != "" {
 		token := os.Getenv(ep.BearerTokenEnv)
-		if token == "" { return "", fmt.Errorf("missing bearer token env %s", ep.BearerTokenEnv) }
+		if token == "" {
+			return "", fmt.Errorf("missing bearer token env %s", ep.BearerTokenEnv)
+		}
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := netguard.Client(60*time.Second, ep.AllowPrivateNetwork)
 	resp, err := client.Do(req)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
-	if err != nil { return "", err }
-	if len(b) > 4<<20 { return "", errors.New("remote response exceeds 4 MiB") }
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 { return "", fmt.Errorf("remote endpoint HTTP %d: %s", resp.StatusCode, string(b)) }
+	if err != nil {
+		return "", err
+	}
+	if len(b) > 4<<20 {
+		return "", errors.New("remote response exceeds 4 MiB")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("remote endpoint HTTP %d: %s", resp.StatusCode, string(b))
+	}
 	return string(b), nil
 }
 
 func (r *Registry) mcpList(ctx context.Context, raw json.RawMessage) (string, error) {
-	var a struct{ Server string `json:"server"` }
-	if err := json.Unmarshal(raw, &a); err != nil { return "", err }
+	var a struct {
+		Server string `json:"server"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", err
+	}
 	ep, err := r.endpoint(a.Server, r.cfg.Protocols.MCPServers)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	return r.remoteRPC(ctx, ep, "mcp", "tools/list", "", map[string]any{})
 }
 func (r *Registry) mcpCall(ctx context.Context, raw json.RawMessage) (string, error) {
-	var a struct { Server string `json:"server"`; Name string `json:"name"`; Arguments map[string]any `json:"arguments"` }
-	if err := json.Unmarshal(raw, &a); err != nil { return "", err }
-	if a.Name == "" { return "", errors.New("remote tool name required") }
+	var a struct {
+		Server    string         `json:"server"`
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", err
+	}
+	if a.Name == "" {
+		return "", errors.New("remote tool name required")
+	}
 	ep, err := r.endpoint(a.Server, r.cfg.Protocols.MCPServers)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	return r.remoteRPC(ctx, ep, "mcp", "tools/call", a.Name, map[string]any{"name": a.Name, "arguments": a.Arguments, "_meta": map[string]any{"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientInfo": map[string]any{"name": "KINGAIBOT", "version": r.cfg.Version}}})
 }
 func (r *Registry) a2aSend(ctx context.Context, raw json.RawMessage) (string, error) {
-	var a struct { Peer string `json:"peer"`; Text string `json:"text"` }
-	if err := json.Unmarshal(raw, &a); err != nil { return "", err }
-	if strings.TrimSpace(a.Text) == "" { return "", errors.New("text required") }
+	var a struct {
+		Peer string `json:"peer"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(a.Text) == "" {
+		return "", errors.New("text required")
+	}
 	ep, err := r.endpoint(a.Peer, r.cfg.Protocols.A2APeers)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	messageID, idErr := storage.RandomID("msg")
-	if idErr != nil { return "", idErr }
+	if idErr != nil {
+		return "", idErr
+	}
 	params := map[string]any{"message": map[string]any{"messageId": messageID, "role": "ROLE_USER", "parts": []any{map[string]any{"text": a.Text}}}}
 	return r.remoteRPC(ctx, ep, "a2a", "SendMessage", "", params)
 }
@@ -339,63 +471,95 @@ func hostAllowed(host string, allowed []string) bool {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
 	for _, a := range allowed {
 		a = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(a), "."))
-		if a == "*" { return true }
+		if a == "*" {
+			return true
+		}
 		if strings.HasPrefix(a, "*.") {
 			suffix := strings.TrimPrefix(a, "*")
-			if strings.HasSuffix(host, suffix) && host != strings.TrimPrefix(suffix, ".") { return true }
+			if strings.HasSuffix(host, suffix) && host != strings.TrimPrefix(suffix, ".") {
+				return true
+			}
 		}
-		if host == a { return true }
+		if host == a {
+			return true
+		}
 	}
 	return false
 }
 
 func secureExisting(p string, roots []string) (string, error) {
 	a, err := filepath.Abs(p)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	real, err := filepath.EvalSymlinks(a)
-	if err != nil { return "", err }
-	if !insideCanonical(real, roots) { return "", errors.New("path outside allowed roots") }
+	if err != nil {
+		return "", err
+	}
+	if !insideCanonical(real, roots) {
+		return "", errors.New("path outside allowed roots")
+	}
 	return real, nil
 }
 func secureWritable(p string, roots []string) (string, error) {
 	a, err := filepath.Abs(p)
-	if err != nil { return "", err }
-	if !inside(a, roots) { return "", errors.New("path outside allowed roots") }
+	if err != nil {
+		return "", err
+	}
 	ancestor := filepath.Dir(a)
 	for {
 		realAncestor, er := filepath.EvalSymlinks(ancestor)
 		if er == nil {
 			rel, relErr := filepath.Rel(ancestor, a)
-			if relErr != nil { return "", relErr }
+			if relErr != nil {
+				return "", relErr
+			}
 			candidate := filepath.Clean(filepath.Join(realAncestor, rel))
-			if !insideCanonical(candidate, roots) { return "", errors.New("path outside allowed roots after symlink resolution") }
+			if !insideCanonical(candidate, roots) {
+				return "", errors.New("path outside allowed roots after symlink resolution")
+			}
 			return candidate, nil
 		}
 		next := filepath.Dir(ancestor)
-		if next == ancestor { return "", er }
+		if next == ancestor {
+			return "", er
+		}
 		ancestor = next
 	}
 }
 func insideCanonical(p string, roots []string) bool {
 	for _, root := range roots {
 		r := filepath.Clean(root)
-		if real, err := filepath.EvalSymlinks(r); err == nil { r = real }
-		if pathInside(p, r) { return true }
+		if real, err := filepath.EvalSymlinks(r); err == nil {
+			r = real
+		}
+		if pathInside(p, r) {
+			return true
+		}
 	}
 	return false
 }
 func inside(p string, roots []string) bool {
-	for _, r := range roots { if pathInside(p, filepath.Clean(r)) { return true } }
+	for _, r := range roots {
+		if pathInside(p, filepath.Clean(r)) {
+			return true
+		}
+	}
 	return false
 }
 func pathInside(p, root string) bool {
-	p = filepath.Clean(p); root = filepath.Clean(root)
+	p = filepath.Clean(p)
+	root = filepath.Clean(root)
 	rel, err := filepath.Rel(root, p)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 func AllowedTools(cfg *config.Config) []string {
 	var out []string
-	for n, d := range cfg.Security.ToolPolicies { if strings.ToLower(d) != "deny" { out = append(out, n) } }
+	for n, d := range cfg.Security.ToolPolicies {
+		if strings.ToLower(d) != "deny" {
+			out = append(out, n)
+		}
+	}
 	sort.Strings(out)
 	return out
 }

@@ -152,78 +152,196 @@ func (c *Config) Normalize(base string) error {
 	}
 	c.Runtime.DataDir = abs(base, c.Runtime.DataDir)
 	c.Runtime.WorkspaceDir = abs(base, c.Runtime.WorkspaceDir)
-	if c.Runtime.MaxSteps <= 0 { c.Runtime.MaxSteps = 12 }
-	if c.Runtime.MaxSteps > 64 { c.Runtime.MaxSteps = 64 }
-	if c.Runtime.WorkerCount <= 0 { c.Runtime.WorkerCount = 2 }
-	if c.Runtime.WorkerCount > 32 { c.Runtime.WorkerCount = 32 }
-	if c.Runtime.MaxRequestBytes <= 0 { c.Runtime.MaxRequestBytes = 1 << 20 }
-	if c.Runtime.RequestTimeoutSeconds <= 0 { c.Runtime.RequestTimeoutSeconds = 120 }
-	if c.Runtime.TaskTimeoutSeconds <= 0 { c.Runtime.TaskTimeoutSeconds = 600 }
-	if c.Runtime.TaskTimeoutSeconds > 86400 { c.Runtime.TaskTimeoutSeconds = 86400 }
-	if c.Runtime.QueueCapacity <= 0 { c.Runtime.QueueCapacity = 1024 }
-	if c.Runtime.QueueCapacity > 100000 { c.Runtime.QueueCapacity = 100000 }
-	if c.Runtime.AuditVerifyIntervalSeconds <= 0 { c.Runtime.AuditVerifyIntervalSeconds = 300 }
-	if c.Runtime.AuditVerifyIntervalSeconds < 30 { c.Runtime.AuditVerifyIntervalSeconds = 30 }
-	if c.Runtime.AuditVerifyIntervalSeconds > 86400 { c.Runtime.AuditVerifyIntervalSeconds = 86400 }
-	if c.Memory.MaxRecords <= 0 { c.Memory.MaxRecords = 5000 }
-	if c.Memory.MaxRecords > 100000 { c.Memory.MaxRecords = 100000 }
-	if c.Memory.MaxContextChars <= 0 { c.Memory.MaxContextChars = 8000 }
-	if c.Memory.MaxContextChars > 64000 { c.Memory.MaxContextChars = 64000 }
-	if c.Security.DefaultToolPolicy == "" { c.Security.DefaultToolPolicy = "deny" }
+	if c.Runtime.MaxSteps <= 0 {
+		c.Runtime.MaxSteps = 12
+	}
+	if c.Runtime.MaxSteps > 64 {
+		c.Runtime.MaxSteps = 64
+	}
+	if c.Runtime.WorkerCount <= 0 {
+		c.Runtime.WorkerCount = 2
+	}
+	if c.Runtime.WorkerCount > 32 {
+		c.Runtime.WorkerCount = 32
+	}
+	if c.Runtime.MaxRequestBytes <= 0 {
+		c.Runtime.MaxRequestBytes = 1 << 20
+	}
+	if c.Runtime.RequestTimeoutSeconds <= 0 {
+		c.Runtime.RequestTimeoutSeconds = 120
+	}
+	if c.Runtime.TaskTimeoutSeconds <= 0 {
+		c.Runtime.TaskTimeoutSeconds = 600
+	}
+	if c.Runtime.TaskTimeoutSeconds > 86400 {
+		c.Runtime.TaskTimeoutSeconds = 86400
+	}
+	if c.Runtime.QueueCapacity <= 0 {
+		c.Runtime.QueueCapacity = 1024
+	}
+	if c.Runtime.QueueCapacity > 100000 {
+		c.Runtime.QueueCapacity = 100000
+	}
+	if c.Runtime.AuditVerifyIntervalSeconds <= 0 {
+		c.Runtime.AuditVerifyIntervalSeconds = 300
+	}
+	if c.Runtime.AuditVerifyIntervalSeconds < 30 {
+		c.Runtime.AuditVerifyIntervalSeconds = 30
+	}
+	if c.Runtime.AuditVerifyIntervalSeconds > 86400 {
+		c.Runtime.AuditVerifyIntervalSeconds = 86400
+	}
+	if c.Memory.MaxRecords <= 0 {
+		c.Memory.MaxRecords = 5000
+	}
+	if c.Memory.MaxRecords > 100000 {
+		c.Memory.MaxRecords = 100000
+	}
+	if c.Memory.MaxContextChars <= 0 {
+		c.Memory.MaxContextChars = 8000
+	}
+	if c.Memory.MaxContextChars > 64000 {
+		c.Memory.MaxContextChars = 64000
+	}
+	if c.Security.DefaultToolPolicy == "" {
+		c.Security.DefaultToolPolicy = "deny"
+	}
 	c.Security.DefaultToolPolicy = strings.ToLower(strings.TrimSpace(c.Security.DefaultToolPolicy))
-	if !validPolicy(c.Security.DefaultToolPolicy) { return errors.New("security.default_tool_policy must be allow, ask, or deny") }
-	if c.Security.ToolPolicies == nil { c.Security.ToolPolicies = map[string]string{} }
+	if !validPolicy(c.Security.DefaultToolPolicy) {
+		return errors.New("security.default_tool_policy must be allow, ask, or deny")
+	}
+	if c.Security.ToolPolicies == nil {
+		c.Security.ToolPolicies = map[string]string{}
+	}
 	for k, v := range c.Security.ToolPolicies {
 		v = strings.ToLower(strings.TrimSpace(v))
-		if !validPolicy(v) { return fmt.Errorf("invalid policy %q for tool %s", v, k) }
+		if !validPolicy(v) {
+			return fmt.Errorf("invalid policy %q for tool %s", v, k)
+		}
 		c.Security.ToolPolicies[k] = v
 	}
-	if len(c.Security.FileReadRoots) == 0 { c.Security.FileReadRoots = []string{c.Runtime.WorkspaceDir} }
-	if len(c.Security.FileWriteRoots) == 0 { c.Security.FileWriteRoots = []string{c.Runtime.WorkspaceDir} }
-	for i := range c.Security.FileReadRoots { c.Security.FileReadRoots[i] = abs(base, c.Security.FileReadRoots[i]) }
-	for i := range c.Security.FileWriteRoots { c.Security.FileWriteRoots[i] = abs(base, c.Security.FileWriteRoots[i]) }
-	if c.Evolution.Mode == "" { c.Evolution.Mode = "proposal-only" }
-	if c.Evolution.Mode != "proposal-only" { return errors.New("only evolution.mode=proposal-only is allowed in this release") }
-	if c.Evolution.CheckIntervalMinutes <= 0 { c.Evolution.CheckIntervalMinutes = 360 }
-	if err := os.MkdirAll(c.Runtime.DataDir, 0o700); err != nil { return err }
-	if err := os.MkdirAll(c.Runtime.WorkspaceDir, 0o700); err != nil { return err }
-	if len(c.Providers) == 0 { return errors.New("at least one provider must be configured") }
+	if len(c.Security.FileReadRoots) == 0 {
+		c.Security.FileReadRoots = []string{c.Runtime.WorkspaceDir}
+	}
+	if len(c.Security.FileWriteRoots) == 0 {
+		c.Security.FileWriteRoots = []string{c.Runtime.WorkspaceDir}
+	}
+	for i := range c.Security.FileReadRoots {
+		c.Security.FileReadRoots[i] = abs(base, c.Security.FileReadRoots[i])
+	}
+	for i := range c.Security.FileWriteRoots {
+		c.Security.FileWriteRoots[i] = abs(base, c.Security.FileWriteRoots[i])
+	}
+	if c.Evolution.Mode == "" {
+		c.Evolution.Mode = "proposal-only"
+	}
+	if c.Evolution.Mode != "proposal-only" {
+		return errors.New("only evolution.mode=proposal-only is allowed in this release")
+	}
+	if c.Evolution.CheckIntervalMinutes <= 0 {
+		c.Evolution.CheckIntervalMinutes = 360
+	}
+	if err := os.MkdirAll(c.Runtime.DataDir, 0o700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(c.Runtime.WorkspaceDir, 0o700); err != nil {
+		return err
+	}
+	if len(c.Providers) == 0 {
+		return errors.New("at least one provider must be configured")
+	}
 	sort.SliceStable(c.Providers, func(i, j int) bool { return c.Providers[i].Priority < c.Providers[j].Priority })
 	enabled := 0
 	for _, p := range c.Providers {
-		if !p.Enabled { continue }
+		if !p.Enabled {
+			continue
+		}
 		enabled++
-		if p.Name == "" || p.BaseURL == "" || p.Model == "" { return fmt.Errorf("enabled provider requires name, base_url and model") }
-		if err := validateEndpointURL(p.BaseURL, p.AllowInsecureHTTP); err != nil { return fmt.Errorf("provider %s: %w", p.Name, err) }
+		if p.Name == "" || p.BaseURL == "" || p.Model == "" {
+			return fmt.Errorf("enabled provider requires name, base_url and model")
+		}
+		if err := validateEndpointURL(p.BaseURL, p.AllowInsecureHTTP); err != nil {
+			return fmt.Errorf("provider %s: %w", p.Name, err)
+		}
 	}
-	if enabled == 0 { return errors.New("at least one provider must be enabled") }
+	if enabled == 0 {
+		return errors.New("at least one provider must be enabled")
+	}
 	for _, ep := range append(append([]RemoteEndpoint{}, c.Protocols.MCPServers...), c.Protocols.A2APeers...) {
 		if ep.Enabled {
-			if ep.Name == "" || ep.URL == "" { return errors.New("enabled remote endpoint requires name and url") }
-			if err := validateEndpointURL(ep.URL, ep.AllowInsecureHTTP); err != nil { return fmt.Errorf("remote endpoint %s: %w", ep.Name, err) }
+			if ep.Name == "" || ep.URL == "" {
+				return errors.New("enabled remote endpoint requires name and url")
+			}
+			if err := validateEndpointURL(ep.URL, ep.AllowInsecureHTTP); err != nil {
+				return fmt.Errorf("remote endpoint %s: %w", ep.Name, err)
+			}
 		}
 	}
 	return nil
 }
 func validPolicy(s string) bool { return s == "allow" || s == "ask" || s == "deny" }
 func validateEndpointURL(raw string, allowHTTP bool) error {
-	u, err := url.Parse(raw); if err != nil { return err }
-	if u.Hostname() == "" { return errors.New("URL requires a hostname") }
-	if u.User != nil { return errors.New("credentials in URL are not allowed") }
-	if u.Scheme == "https" { return nil }
-	if u.Scheme != "http" { return errors.New("only https is allowed (http requires explicit allow_insecure_http)") }
-	if !allowHTTP { return errors.New("insecure http endpoint is disabled") }
-	h := u.Hostname(); ip := net.ParseIP(h)
-	if ip != nil && ip.IsLoopback() { return nil }
-	if strings.EqualFold(h, "localhost") { return nil }
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	if u.Hostname() == "" {
+		return errors.New("URL requires a hostname")
+	}
+	if u.User != nil {
+		return errors.New("credentials in URL are not allowed")
+	}
+	if u.Scheme == "https" {
+		return nil
+	}
+	if u.Scheme != "http" {
+		return errors.New("only https is allowed (http requires explicit allow_insecure_http)")
+	}
+	if !allowHTTP {
+		return errors.New("insecure http endpoint is disabled")
+	}
+	h := u.Hostname()
+	ip := net.ParseIP(h)
+	if ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	if strings.EqualFold(h, "localhost") {
+		return nil
+	}
 	return errors.New("insecure http is permitted only for loopback endpoints")
 }
 func validateServerBaseURL(raw string) error {
-	u, err := url.Parse(raw); if err != nil { return err }
-	if u.Hostname() == "" || u.User != nil { return errors.New("base URL requires a hostname and must not contain credentials") }
-	if u.RawQuery != "" || u.Fragment != "" { return errors.New("base URL must not contain query or fragment") }
-	if u.Scheme == "https" { return nil }
-	if u.Scheme == "http" { h := u.Hostname(); if strings.EqualFold(h, "localhost") { return nil }; if ip := net.ParseIP(h); ip != nil && ip.IsLoopback() { return nil } }
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	if u.Hostname() == "" || u.User != nil {
+		return errors.New("base URL requires a hostname and must not contain credentials")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("base URL must not contain query or fragment")
+	}
+	if u.Scheme == "https" {
+		return nil
+	}
+	if u.Scheme == "http" {
+		h := u.Hostname()
+		if strings.EqualFold(h, "localhost") {
+			return nil
+		}
+		if ip := net.ParseIP(h); ip != nil && ip.IsLoopback() {
+			return nil
+		}
+	}
 	return errors.New("public base URL must use https; http is allowed only for loopback")
 }
-func abs(base, p string) string { if filepath.IsAbs(p) { return filepath.Clean(p) }; a, err := filepath.Abs(filepath.Join(base, p)); if err != nil { return filepath.Clean(filepath.Join(base, p)) }; return a }
+func abs(base, p string) string {
+	if filepath.IsAbs(p) {
+		return filepath.Clean(p)
+	}
+	a, err := filepath.Abs(filepath.Join(base, p))
+	if err != nil {
+		return filepath.Clean(filepath.Join(base, p))
+	}
+	return a
+}

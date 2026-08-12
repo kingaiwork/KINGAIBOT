@@ -52,7 +52,7 @@ func TestMCPDiscoverAndA2AVersionedMethodNames(t *testing.T) {
 	mcpReq.Header.Set("Authorization", "Bearer "+strings.Repeat("m", 32))
 	mcpRR := httptest.NewRecorder()
 	s.Handler().ServeHTTP(mcpRR, mcpReq)
-	if mcpRR.Code != http.StatusOK || !strings.Contains(mcpRR.Body.String(), `"resultType":"complete"`) {
+	if mcpRR.Code != http.StatusOK || !strings.Contains(mcpRR.Body.String(), `"protocolVersion":"2026-07-28"`) {
 		t.Fatalf("unexpected MCP discover response: %d %s", mcpRR.Code, mcpRR.Body.String())
 	}
 

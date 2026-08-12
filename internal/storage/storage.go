@@ -29,16 +29,31 @@ func AtomicWriteFile(path string, data []byte, mode os.FileMode) error {
 	}
 	tmp := f.Name()
 	defer os.Remove(tmp)
-	if err = f.Chmod(mode); err != nil { _ = f.Close(); return err }
-	if _, err = f.Write(data); err != nil { _ = f.Close(); return err }
-	if err = f.Sync(); err != nil { _ = f.Close(); return err }
-	if err = f.Close(); err != nil { return err }
-	if err = replaceFile(tmp, path); err != nil { return err }
+	if err = f.Chmod(mode); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if _, err = f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	if err = replaceFile(tmp, path); err != nil {
+		return err
+	}
 	return syncDir(dir)
 }
 
 func RandomID(prefix string) (string, error) {
 	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil { return "", errors.New("secure random generator unavailable") }
+	if _, err := rand.Read(b); err != nil {
+		return "", errors.New("secure random generator unavailable")
+	}
 	return prefix + "_" + hex.EncodeToString(b), nil
 }
