@@ -1,0 +1,43 @@
+name: KINGAIBOT V1.2 one-shot expansion
+
+on:
+  push:
+    branches:
+      - agent/v1.2-security-expansion
+
+permissions:
+  contents: write
+
+jobs:
+  expand:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: true
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.5'
+          cache: false
+      - name: Apply expansion
+        run: python3 scripts/v12_expand.py
+      - name: Validate expansion
+        shell: bash
+        run: |
+          set -euo pipefail
+          gofmt -w .
+          test -z "$(gofmt -l .)"
+          go test -count=1 ./...
+          go vet ./...
+          go test -race -count=1 ./...
+          for f in scripts/*.sh; do bash -n "$f"; done
+      - name: Commit validated expansion
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/v12-expand.yml scripts/v12_expand.py
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Expand safe file capabilities and KINGAIBOT release branding for V1.2'
+          git push origin HEAD:agent/v1.2-security-expansion
