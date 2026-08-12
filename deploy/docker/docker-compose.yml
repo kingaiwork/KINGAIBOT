@@ -1,0 +1,26 @@
+services:
+  kingagent:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18888:18888"
+    environment:
+      KINGAGENT_ADMIN_TOKEN: "${KINGAGENT_ADMIN_TOKEN:?required}"
+      KINGAGENT_MCP_TOKEN: "${KINGAGENT_MCP_TOKEN:?required}"
+      KINGAGENT_A2A_TOKEN: "${KINGAGENT_A2A_TOKEN:?required}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:?required}"
+    volumes:
+      - kingagent-data:/data
+      - ./config.docker.json:/etc/kingagent/config.json:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  kingagent-data:

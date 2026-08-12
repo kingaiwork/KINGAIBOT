@@ -1,0 +1,15 @@
+KING AGENT OS COMMERCIAL SOURCE LICENSE
+Copyright (c) 2026 DXTECH LLC. All rights reserved.
+
+This source package is proprietary commercial software. No rights are granted to copy,
+redistribute, sublicense, publish, sell, host as a service, reverse engineer, or create
+derivative commercial distributions except under a separate written license from the
+copyright holder.
+
+Customers may receive executable or source rights only as stated in their applicable
+commercial agreement. Third-party components, protocols, trademarks, and services remain
+subject to their respective licenses and terms.
+
+THE SOFTWARE IS PROVIDED UNDER THE WARRANTIES, SUPPORT TERMS, SERVICE LEVELS, AND LIABILITY
+LIMITATIONS SET OUT IN THE APPLICABLE COMMERCIAL AGREEMENT. THIS FILE IS NOT LEGAL ADVICE;
+have counsel adapt the final production EULA/MSA and privacy terms before public sale.
