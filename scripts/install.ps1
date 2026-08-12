@@ -20,7 +20,7 @@ $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw "Run PowerShell as Administrator." }
 $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq "Arm64") { "arm64" } else { "amd64" }
-$asset = "king-agent-os_windows_$arch.zip"
+$asset = "kingaibot_windows_$arch.zip"
 $channel = if ($env:KINGAGENT_CHANNEL) { $env:KINGAGENT_CHANNEL } else { "latest" }
 if ($channel -eq "latest") { $base = "https://github.com/$Repo/releases/latest/download" }
 elseif ($channel -match '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9._-]+)?$') { $base = "https://github.com/$Repo/releases/download/$channel" }

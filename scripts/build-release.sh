@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${VERSION:-${GITHUB_REF_NAME:-1.1.0}}"
+VERSION="${VERSION:-${GITHUB_REF_NAME:-1.2.0}}"
 VERSION="${VERSION#v}"
 MIN_GO_VERSION="${KINGAGENT_MIN_RELEASE_GO:-1.26.5}"
 GO_VERSION="$(go env GOVERSION)"
@@ -51,10 +51,10 @@ build_one() {
   cp "$ROOT/scripts/update.ps1" "$dir/update.ps1"
   chmod 0755 "$dir/update.sh"; normalize_mtime "$dir"
   if [[ "$goos" == windows ]]; then
-    archive="$DIST/king-agent-os_${goos}_${goarch}.zip"
+    archive="$DIST/kingaibot_${goos}_${goarch}.zip"
     (cd "$dir" && find . -type f -print | LC_ALL=C sort | zip -q -X "$archive" -@)
   else
-    archive="$DIST/king-agent-os_${goos}_${goarch}.tar.gz"
+    archive="$DIST/kingaibot_${goos}_${goarch}.tar.gz"
     tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner -C "$dir" -cf - . | gzip -n > "$archive"
   fi
   rm -rf "$dir"
@@ -63,5 +63,5 @@ pids=()
 for target in "linux amd64" "linux arm64" "darwin amd64" "darwin arm64" "windows amd64" "windows arm64"; do build_one $target & pids+=("$!"); done
 for pid in "${pids[@]}"; do wait "$pid"; done
 "$ROOT/scripts/generate-sbom.py" "$DIST/sbom.cdx.json"
-(cd "$DIST" && sha256sum king-agent-os_* sbom.cdx.json > SHA256SUMS)
+(cd "$DIST" && sha256sum kingaibot_* sbom.cdx.json > SHA256SUMS)
 echo "Release artifacts written to $DIST"

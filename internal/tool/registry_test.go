@@ -166,3 +166,33 @@ func TestFileToolRejectsSymlinkEscapeWithOSRoot(t *testing.T) {
 		t.Fatalf("outside file unexpectedly created: %v", err)
 	}
 }
+
+func TestSafeFileManagementTools(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{Security: config.Security{FileReadRoots: []string{root}, FileWriteRoots: []string{root}}}
+	reg := New(cfg, nil, nil, nil)
+	dir := filepath.Join(root, "nested")
+	mkdirArgs, _ := json.Marshal(map[string]any{"path": dir})
+	if _, err := reg.fileMkdir(mkdirArgs); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	statArgs, _ := json.Marshal(map[string]any{"path": file})
+	if out, err := reg.fileStat(statArgs); err != nil || !strings.Contains(out, `"name":"a.txt"`) {
+		t.Fatalf("stat: %v %s", err, out)
+	}
+	listArgs, _ := json.Marshal(map[string]any{"path": dir})
+	if out, err := reg.fileList(listArgs); err != nil || !strings.Contains(out, `"name":"a.txt"`) {
+		t.Fatalf("list: %v %s", err, out)
+	}
+	deleteArgs, _ := json.Marshal(map[string]any{"path": file})
+	if _, err := reg.fileDelete(deleteArgs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatalf("file still exists: %v", err)
+	}
+}
