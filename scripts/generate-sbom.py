@@ -1,39 +1,102 @@
 #!/usr/bin/env python3
+"""Generate a standards-compliant, reproducible CycloneDX SBOM for KINGAIBOT.
+
+The BOM structure is produced by the official CycloneDX Go module generator,
+pinned to an explicit version. This script only normalizes release metadata that
+must be deterministic across repeated builds of the same source revision.
+"""
+
 import datetime as dt
 import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
-from urllib.parse import quote
+
+CYCLONEDX_GOMOD = "github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0"
+CYCLONEDX_SPEC = "1.6"
 
 root = Path(__file__).resolve().parents[1]
 out = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "dist" / "sbom.cdx.json"
-version = os.environ.get("VERSION", "1.1.0").lstrip("v")
+version = os.environ.get("VERSION", "1.2.1").lstrip("v")
 source_epoch = int(os.environ.get("SOURCE_DATE_EPOCH", "0") or "0")
+
 if source_epoch <= 0:
-    try: source_epoch = int(subprocess.check_output(["git", "log", "-1", "--format=%ct"], cwd=root, text=True, stderr=subprocess.DEVNULL).strip())
-    except Exception: source_epoch = 315532800
-if source_epoch > 0:
-    timestamp = dt.datetime.fromtimestamp(source_epoch, tz=dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-else: timestamp = "1970-01-01T00:00:00Z"
-def go_modules():
-    proc = subprocess.run(["go", "list", "-m", "-json", "all"], cwd=root, text=True, capture_output=True, check=True)
-    dec = json.JSONDecoder(); text = proc.stdout; pos = 0; mods = []
-    while pos < len(text):
-        while pos < len(text) and text[pos].isspace(): pos += 1
-        if pos >= len(text): break
-        obj, pos = dec.raw_decode(text, pos); mods.append(obj)
-    return mods
-mods = go_modules(); components = []
-for m in mods:
-    if m.get("Main"): continue
-    path = m.get("Path"); ver = m.get("Version") or "unknown"; repl = m.get("Replace")
-    if repl: path = repl.get("Path", path); ver = repl.get("Version") or ver
-    if not path: continue
-    purl = f"pkg:golang/{quote(path, safe='/')}@{quote(ver, safe='.+~-')}"
-    components.append({"type":"library","name":path,"version":ver,"purl":purl,"bom-ref":purl})
-components.sort(key=lambda x: (x["name"], x["version"]))
-bom = {"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"metadata":{"timestamp":timestamp,"tools":{"components":[{"type":"application","name":"Go toolchain","version":subprocess.check_output(["go","version"],text=True).strip()}]},"component":{"type":"application","name":"KINGAIBOT","version":version,"bom-ref":f"pkg:generic/king-agent-os@{quote(version, safe='.+~-')}"}},"components":components}
+    try:
+        source_epoch = int(
+            subprocess.check_output(
+                ["git", "log", "-1", "--format=%ct"],
+                cwd=root,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        )
+    except Exception:
+        source_epoch = 315532800
+
+timestamp = (
+    dt.datetime.fromtimestamp(source_epoch, tz=dt.timezone.utc)
+    .replace(microsecond=0)
+    .isoformat()
+    .replace("+00:00", "Z")
+)
+
+with tempfile.TemporaryDirectory(prefix="kingaibot-sbom-") as tmpdir:
+    raw_bom = Path(tmpdir) / "bom.cdx.json"
+    cmd = [
+        "go",
+        "run",
+        CYCLONEDX_GOMOD,
+        "mod",
+        "-json",
+        "-noserial",
+        "-output-version",
+        CYCLONEDX_SPEC,
+        "-type",
+        "application",
+        "-output",
+        str(raw_bom),
+        str(root),
+    ]
+    subprocess.run(cmd, cwd=root, check=True, timeout=300)
+    bom = json.loads(raw_bom.read_text(encoding="utf-8"))
+
+if bom.get("bomFormat") != "CycloneDX":
+    raise SystemExit("official generator did not return a CycloneDX BOM")
+if bom.get("specVersion") != CYCLONEDX_SPEC:
+    raise SystemExit(
+        f"unexpected CycloneDX version: {bom.get('specVersion')!r}; expected {CYCLONEDX_SPEC}"
+    )
+
+metadata = bom.setdefault("metadata", {})
+metadata["timestamp"] = timestamp
+component = metadata.setdefault("component", {})
+component["type"] = "application"
+component["name"] = "KINGAIBOT"
+component["version"] = version
+
+# Keep generator-created bom-ref/PURL/dependency relationships intact. Only
+# deterministic presentation ordering is normalized below.
+components = bom.get("components")
+if isinstance(components, list):
+    components.sort(
+        key=lambda item: (
+            str(item.get("bom-ref", "")),
+            str(item.get("name", "")),
+            str(item.get("version", "")),
+        )
+    )
+dependencies = bom.get("dependencies")
+if isinstance(dependencies, list):
+    dependencies.sort(key=lambda item: str(item.get("ref", "")))
+    for item in dependencies:
+        depends_on = item.get("dependsOn")
+        if isinstance(depends_on, list):
+            depends_on.sort()
+
 out.parent.mkdir(parents=True, exist_ok=True)
-out.write_text(json.dumps(bom, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+out.write_text(
+    json.dumps(bom, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+    encoding="utf-8",
+)
