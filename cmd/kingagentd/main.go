@@ -26,7 +26,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/tool"
 )
 
-var version = "1.2.0"
+var version = "1.2.1"
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "configuration file")
