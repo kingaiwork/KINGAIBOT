@@ -18,7 +18,7 @@ WORKFLOW_IDENTITY_REGEX="^https://github\.com/${REPO_REGEX}/\.github/workflows/r
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"; ARCH_RAW="$(uname -m)"
 case "$OS" in linux|darwin) ;; *) echo "Unsupported OS: $OS" >&2; exit 1;; esac
 case "$ARCH_RAW" in x86_64|amd64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; *) echo "Unsupported architecture: $ARCH_RAW" >&2; exit 1;; esac
-ASSET="king-agent-os_${OS}_${ARCH}.tar.gz"; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+ASSET="kingaibot_${OS}_${ARCH}.tar.gz"; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 sha256_file() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'; elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'; else echo "No SHA-256 utility found." >&2; return 1; fi; }
 verify_checksum() { local sums="$1" asset="$2" file="$3" expected actual; expected="$(awk -v a="$asset" '$2==a || $2=="*"a {print $1; exit}' "$sums")"; [[ -n "$expected" ]] || { echo "Checksum entry not found for $asset" >&2; return 1; }; actual="$(sha256_file "$file")"; [[ "$(printf %s "$actual" | tr '[:upper:]' '[:lower:]')" == "$(printf %s "$expected" | tr '[:upper:]' '[:lower:]')" ]] || { echo "SHA256 verification failed for $asset" >&2; return 1; }; echo "SHA256 verified."; }
 gen_token() { if command -v openssl >/dev/null 2>&1; then openssl rand -hex 32; else head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'; fi; }

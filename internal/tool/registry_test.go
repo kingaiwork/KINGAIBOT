@@ -137,3 +137,62 @@ func TestToolExecutionFailsClosedWithoutAuditLog(t *testing.T) {
 		t.Fatalf("expected fail-closed audit error, got %v", err)
 	}
 }
+
+func TestFileToolRejectsSymlinkEscapeWithOSRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation permissions vary on Windows")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "escape")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Security: config.Security{FileReadRoots: []string{root}, FileWriteRoots: []string{root}}}
+	reg := New(cfg, nil, nil, nil)
+	readArgs, _ := json.Marshal(map[string]any{"path": link})
+	if _, err := reg.fileRead(readArgs); err == nil {
+		t.Fatal("expected read through escaping symlink to be rejected")
+	}
+	writeArgs, _ := json.Marshal(map[string]any{"path": filepath.Join(root, "escape", "pwned.txt"), "content": "blocked"})
+	if _, err := reg.fileWrite(writeArgs); err == nil {
+		t.Fatal("expected write through escaping symlink to be rejected")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "pwned.txt")); !os.IsNotExist(err) {
+		t.Fatalf("outside file unexpectedly created: %v", err)
+	}
+}
+
+func TestSafeFileManagementTools(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{Security: config.Security{FileReadRoots: []string{root}, FileWriteRoots: []string{root}}}
+	reg := New(cfg, nil, nil, nil)
+	dir := filepath.Join(root, "nested")
+	mkdirArgs, _ := json.Marshal(map[string]any{"path": dir})
+	if _, err := reg.fileMkdir(mkdirArgs); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	statArgs, _ := json.Marshal(map[string]any{"path": file})
+	if out, err := reg.fileStat(statArgs); err != nil || !strings.Contains(out, `"name":"a.txt"`) {
+		t.Fatalf("stat: %v %s", err, out)
+	}
+	listArgs, _ := json.Marshal(map[string]any{"path": dir})
+	if out, err := reg.fileList(listArgs); err != nil || !strings.Contains(out, `"name":"a.txt"`) {
+		t.Fatalf("list: %v %s", err, out)
+	}
+	deleteArgs, _ := json.Marshal(map[string]any{"path": file})
+	if _, err := reg.fileDelete(deleteArgs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatalf("file still exists: %v", err)
+	}
+}

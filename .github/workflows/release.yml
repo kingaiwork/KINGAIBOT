@@ -35,8 +35,8 @@ jobs:
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-path: |
-            dist/king-agent-os_*.tar.gz
-            dist/king-agent-os_*.zip
+            dist/kingaibot_*.tar.gz
+            dist/kingaibot_*.zip
             dist/sbom.cdx.json
             dist/SHA256SUMS
       - name: Attest public SBOM
@@ -44,14 +44,14 @@ jobs:
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-path: |
-            dist/king-agent-os_*.tar.gz
-            dist/king-agent-os_*.zip
+            dist/kingaibot_*.tar.gz
+            dist/kingaibot_*.zip
           sbom-path: dist/sbom.cdx.json
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Sign release assets with GitHub OIDC
         run: |
           set -euo pipefail
-          for f in dist/king-agent-os_* dist/sbom.cdx.json dist/SHA256SUMS; do
+          for f in dist/kingaibot_* dist/sbom.cdx.json dist/SHA256SUMS; do
             cosign sign-blob --yes --bundle "${f}.sigstore.json" "$f"
           done
       - name: Publish GitHub Release

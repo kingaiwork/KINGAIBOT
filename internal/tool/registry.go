@@ -54,6 +54,10 @@ func (r *Registry) Definitions() []provider.ToolDef {
 		def("system_info", "Read safe local runtime information", map[string]any{"type": "object", "properties": map[string]any{}}),
 		def("file_read", "Read a UTF-8 text file inside approved roots", map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []string{"path"}}),
 		def("file_write", "Write a UTF-8 text file inside approved roots", map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}}, "required": []string{"path", "content"}}),
+		def("file_stat", "Read metadata for a file or directory inside approved roots", map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []string{"path"}}),
+		def("file_list", "List one directory inside approved roots", map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []string{"path"}}),
+		def("file_mkdir", "Create a directory tree inside approved write roots", map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []string{"path"}}),
+		def("file_delete", "Delete one file or one empty directory inside approved write roots", map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []string{"path"}}),
 		def("http_get", "Perform an HTTPS GET to an approved host with DNS-rebinding/SSRF protection", map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}}, "required": []string{"url"}}),
 		def("shell_exec", "Execute an allow-listed binary directly without a shell", map[string]any{"type": "object", "properties": map[string]any{"argv": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 120}}, "required": []string{"argv"}}),
 		def("mcp_tools_list", "List tools from an explicitly configured remote MCP server", map[string]any{"type": "object", "properties": map[string]any{"server": map[string]any{"type": "string"}}, "required": []string{"server"}}),
@@ -175,6 +179,14 @@ func (r *Registry) executeCore(ctx context.Context, name string, args json.RawMe
 		return r.fileRead(args)
 	case "file_write":
 		return r.fileWrite(args)
+	case "file_stat":
+		return r.fileStat(args)
+	case "file_list":
+		return r.fileList(args)
+	case "file_mkdir":
+		return r.fileMkdir(args)
+	case "file_delete":
+		return r.fileDelete(args)
 	case "http_get":
 		return r.httpGet(ctx, args)
 	case "shell_exec":
@@ -201,11 +213,7 @@ func (r *Registry) fileRead(raw json.RawMessage) (string, error) {
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return "", err
 	}
-	p, err := secureExisting(a.Path, r.cfg.Security.FileReadRoots)
-	if err != nil {
-		return "", err
-	}
-	f, err := os.Open(p)
+	f, err := storage.OpenAllowedFile(a.Path, r.cfg.Security.FileReadRoots)
 	if err != nil {
 		return "", err
 	}
@@ -231,18 +239,69 @@ func (r *Registry) fileWrite(raw json.RawMessage) (string, error) {
 	if len(a.Content) > 2<<20 {
 		return "", errors.New("content exceeds 2 MiB limit")
 	}
-	p, err := secureWritable(a.Path, r.cfg.Security.FileWriteRoots)
+	if err := storage.AtomicWriteAllowedFile(a.Path, r.cfg.Security.FileWriteRoots, []byte(a.Content), 0o600); err != nil {
+		return "", err
+	}
+	return `{"ok":true}`, nil
+}
+
+func (r *Registry) fileStat(raw json.RawMessage) (string, error) {
+	var a struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", err
+	}
+	info, err := storage.StatAllowedPath(a.Path, r.cfg.Security.FileReadRoots)
 	if err != nil {
 		return "", err
 	}
-	if err = os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return "", err
-	}
-	p, err = secureWritable(p, r.cfg.Security.FileWriteRoots)
+	b, err := json.Marshal(info)
 	if err != nil {
 		return "", err
 	}
-	if err = storage.AtomicWriteFile(p, []byte(a.Content), 0o600); err != nil {
+	return string(b), nil
+}
+
+func (r *Registry) fileList(raw json.RawMessage) (string, error) {
+	var a struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", err
+	}
+	entries, err := storage.ListAllowedDir(a.Path, r.cfg.Security.FileReadRoots)
+	if err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(entries)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (r *Registry) fileMkdir(raw json.RawMessage) (string, error) {
+	var a struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", err
+	}
+	if err := storage.MkdirAllowed(a.Path, r.cfg.Security.FileWriteRoots); err != nil {
+		return "", err
+	}
+	return `{"ok":true}`, nil
+}
+
+func (r *Registry) fileDelete(raw json.RawMessage) (string, error) {
+	var a struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", err
+	}
+	if err := storage.RemoveAllowed(a.Path, r.cfg.Security.FileWriteRoots); err != nil {
 		return "", err
 	}
 	return `{"ok":true}`, nil
@@ -268,6 +327,9 @@ func (r *Registry) httpGet(ctx context.Context, raw json.RawMessage) (string, er
 	if u.Hostname() == "" {
 		return "", errors.New("URL hostname required")
 	}
+	if port := u.Port(); port != "" && port != "443" {
+		return "", errors.New("http_get permits only the standard HTTPS port")
+	}
 	if !hostAllowed(u.Hostname(), r.cfg.Security.HTTPAllowedHosts) {
 		return "", errors.New("host not in allowlist")
 	}
@@ -279,6 +341,12 @@ func (r *Registry) httpGet(ctx context.Context, raw json.RawMessage) (string, er
 		if req.URL.User != nil {
 			return errors.New("redirect URL credentials denied")
 		}
+		if req.URL.Scheme != "https" {
+			return errors.New("redirect protocol downgrade denied")
+		}
+		if port := req.URL.Port(); port != "" && port != "443" {
+			return errors.New("redirect non-standard HTTPS port denied")
+		}
 		if !hostAllowed(req.URL.Hostname(), r.cfg.Security.HTTPAllowedHosts) {
 			return errors.New("redirect host denied")
 		}
@@ -288,7 +356,7 @@ func (r *Registry) httpGet(ctx context.Context, raw json.RawMessage) (string, er
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "KING-Agent-OS/1.1")
+	req.Header.Set("User-Agent", "KINGAIBOT/1.2")
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -395,6 +463,7 @@ func (r *Registry) remoteRPC(ctx context.Context, ep config.RemoteEndpoint, prot
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := netguard.Client(60*time.Second, ep.AllowPrivateNetwork)
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err

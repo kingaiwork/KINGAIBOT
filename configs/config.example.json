@@ -1,6 +1,6 @@
 {
   "name": "KINGAIBOT",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "server": {
     "listen": "127.0.0.1:18888",
     "base_url": "",
@@ -50,6 +50,10 @@
       "system_info": "allow",
       "file_read": "allow",
       "file_write": "ask",
+      "file_stat": "allow",
+      "file_list": "allow",
+      "file_mkdir": "ask",
+      "file_delete": "ask",
       "http_get": "ask",
       "shell_exec": "deny",
       "mcp_tools_list": "allow",

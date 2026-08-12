@@ -232,6 +232,20 @@ func (c *Config) Normalize(base string) error {
 	for i := range c.Security.FileWriteRoots {
 		c.Security.FileWriteRoots[i] = abs(base, c.Security.FileWriteRoots[i])
 	}
+	for _, host := range c.Security.HTTPAllowedHosts {
+		host = strings.TrimSpace(host)
+		if host == "*" {
+			return errors.New("security.http_allowed_hosts does not permit a global wildcard")
+		}
+		if host == "" || strings.ContainsAny(host, "/@?#") {
+			return fmt.Errorf("invalid HTTP allowed host %q", host)
+		}
+	}
+	for _, command := range c.Security.ShellAllowlist {
+		if command == "" || command != filepath.Base(command) || strings.ContainsAny(command, "/\\") || strings.IndexByte(command, 0) >= 0 || len(command) > 128 {
+			return fmt.Errorf("invalid shell allowlist command %q; only bare command names are allowed", command)
+		}
+	}
 	if c.Evolution.Mode == "" {
 		c.Evolution.Mode = "proposal-only"
 	}

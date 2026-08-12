@@ -26,7 +26,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/tool"
 )
 
-var version = "1.1.0"
+var version = "1.2.0"
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "configuration file")
@@ -75,6 +75,7 @@ func main() {
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
 }
+
 func must(err error) {
 	if err != nil {
 		slog.Error("startup failed", "error", err)

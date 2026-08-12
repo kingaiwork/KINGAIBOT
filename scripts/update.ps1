@@ -8,7 +8,7 @@ if ($repoParts[0] -in @('.', '..') -or $repoParts[1] -in @('.', '..')) { throw "
 $repoRegex = [regex]::Escape($Repo)
 $workflowIdentityPattern = "^https://github\.com/$repoRegex/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9._-]+)?$"
 $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq "Arm64") { "arm64" } else { "amd64" }
-$asset = "king-agent-os_windows_$arch.zip"; $base = "https://github.com/$Repo/releases/latest/download"
+$asset = "kingaibot_windows_$arch.zip"; $base = "https://github.com/$Repo/releases/latest/download"
 $tmp = Join-Path $env:TEMP ("kingagent-update-" + [guid]::NewGuid().ToString("N")); $root = Join-Path $env:ProgramData "KINGAgent"; $bin = Join-Path $root "bin"; $taskName = "KINGAIBOT"
 New-Item -ItemType Directory -Force $tmp | Out-Null
 try {

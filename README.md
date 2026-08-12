@@ -29,22 +29,27 @@ KINGAIBOT Execution Layer
 Devices / APIs / Tools / MCP / A2A / Workflows / Services
 ```
 
-### Current v1.1.0 Foundation
+### Current v1.2.0 Foundation
 
 - Cross-platform Go runtime for Linux, macOS and Windows
+- Go 1.26.5 production source/release baseline
 - API-key-based model providers with model-vendor independence
 - Durable task persistence and restart recovery
 - Approval-aware tool execution with `allow / ask / deny`
-- Filesystem sandbox and symlink/path traversal defense
-- HTTPS tool with SSRF and DNS-rebinding protections
-- Shell disabled by default and restricted to explicit executable allowlists
+- Exact approvals bound to task + tool + canonical argument hash
+- Go `os.Root` traversal-resistant filesystem sandbox
+- Safe file capabilities: read, stat, list, atomic write, mkdir and single-item delete
+- No agent-exposed recursive delete in V1.2
+- HTTPS tool with allowlist, SSRF/DNS-rebinding protection and redirect downgrade prevention
+- Authenticated Provider / MCP / A2A requests do not automatically follow redirects
+- Shell disabled by default and restricted to explicit bare executable allowlists when enabled
 - Separate Admin / MCP / A2A identities
 - MCP server and remote MCP bridge
 - A2A Agent Card and remote agent bridge
 - Hash-chained audit/event log with integrity verification
 - Controlled evolution proposals rather than uncontrolled self-modification
-- Safe update pipeline with checksums, signature policy and rollback
-- GitHub CI, CodeQL, vulnerability gates, SBOM, provenance and Sigstore-oriented release flow
+- Safe update pipeline with checksums, signature policy, health verification and rollback
+- GitHub CI, CodeQL, govulncheck, race tests, SBOM, provenance and Sigstore-oriented release flow
 
 ### Design Principles
 
@@ -63,6 +68,7 @@ Devices / APIs / Tools / MCP / A2A / Workflows / Services
 - [User & Operations Guide](docs/USAGE.md)
 - [Long-Term Roadmap](docs/ROADMAP.md)
 - [Future Technology Integration Plan](docs/FUTURE-TECHNOLOGY.md)
+- [V1.2 Security & Execution-Layer Baseline](docs/V1.2-SECURITY-AND-EXECUTION.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security](docs/SECURITY.md)
 - [Controlled Evolution](docs/EVOLUTION.md)
@@ -147,22 +153,27 @@ KINGAIBOT 终端执行层
 设备 / API / 工具 / MCP / A2A / 工作流 / 服务
 ```
 
-### 当前 v1.1.0 基础能力
+### 当前 v1.2.0 基础能力
 
 - Linux / macOS / Windows 跨平台 Go Runtime
+- Go 1.26.5 生产源码与正式 Release 基线
 - 基于 API Key 的多模型 Provider，模型厂商可替换
 - Durable Task 持久任务与重启恢复
 - `allow / ask / deny` 权限与审批机制
-- 文件系统沙箱、路径穿越和符号链接防护
-- HTTPS 工具、SSRF 与 DNS Rebinding 防护
-- Shell 默认关闭，只允许显式白名单程序
+- 审批精确绑定“任务 + 工具 + 规范化参数哈希”
+- 基于 Go `os.Root` 的抗路径穿越文件系统沙箱
+- 安全文件能力：读取、元数据、目录列表、原子写入、建目录、单项删除
+- V1.2 不向智能体暴露递归删除
+- HTTPS 工具、目标白名单、SSRF/DNS Rebinding 防护与重定向降级阻断
+- Provider / MCP / A2A 鉴权请求不自动跟随重定向
+- Shell 默认关闭；启用时只允许管理员显式配置的裸命令名
 - Admin / MCP / A2A 三套独立身份
 - MCP Server 与远程 MCP Bridge
 - A2A Agent Card 与远程 Agent Bridge
 - SHA-256 前向哈希链审计日志与完整性验证
 - 受控自进化提案机制，而不是生产代码无限自修改
 - 校验、签名策略、健康检查和回滚式安全升级
-- GitHub CI、CodeQL、漏洞检查、SBOM、构建溯源和 Sigstore 发布链
+- GitHub CI、CodeQL、govulncheck、Race、SBOM、构建溯源和 Sigstore 发布链
 
 ### 长期开发原则
 
@@ -187,6 +198,7 @@ GitHub：**kingaiwork/KINGAIBOT**
 - [使用与运维手册](docs/USAGE.md)
 - [长期开发路线图](docs/ROADMAP.md)
 - [未来前沿技术融合计划](docs/FUTURE-TECHNOLOGY.md)
+- [V1.2 安全与终端执行层基线](docs/V1.2-SECURITY-AND-EXECUTION.md)
 - [架构](docs/ARCHITECTURE.md)
 - [安全](docs/SECURITY.md)
 - [受控进化](docs/EVOLUTION.md)
