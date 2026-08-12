@@ -1,0 +1,25 @@
+name: Trigger KINGAIBOT v1.2.0 release
+
+on:
+  push:
+    branches:
+      - agent/release-v1.2-trigger
+
+permissions:
+  actions: write
+
+jobs:
+  trigger:
+    if: github.repository == 'kingaiwork/KINGAIBOT' && github.ref == 'refs/heads/agent/release-v1.2-trigger'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch tag-first release preparation on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f publish_tag=v1.2.0
