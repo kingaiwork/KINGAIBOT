@@ -19,27 +19,45 @@ jobs:
         with:
           go-version: '1.26.5'
           cache: false
-      - name: Apply known portability/test fixes and format
+      - name: Apply portability/test fixes and format
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
 
+          # macOS canonicalizes /var -> /private/var. Validate against canonical roots,
+          # not a pre-canonical lexical path comparison.
           p = Path('internal/tool/registry.go')
           s = p.read_text()
-          old = '\tif !inside(a, roots) { return "", errors.New("path outside allowed roots") }\n'
+          old = '\tif !inside(a, roots) {\n\t\treturn "", errors.New("path outside allowed roots")\n\t}\n'
+          if old not in s:
+              old = '\tif !inside(a, roots) { return "", errors.New("path outside allowed roots") }\n'
           if old not in s:
               raise SystemExit('secureWritable patch target not found')
           s = s.replace(old, '', 1)
           p.write_text(s)
 
+          # MCP server/discover returns discovery metadata, not a tool result envelope.
           p = Path('internal/api/server_test.go')
           s = p.read_text()
-          old = 'if mcpRR.Code != http.StatusOK || !strings.Contains(mcpRR.Body.String(), `\\"resultType\\":\\"complete\\"`) {'
-          new = 'if mcpRR.Code != http.StatusOK || !strings.Contains(mcpRR.Body.String(), `\\"protocolVersion\\":\\"2026-07-28\\"`) {'
-          if old not in s:
+          before = s
+          s = s.replace('resultType', 'protocolVersion', 1)
+          s = s.replace('complete', '2026-07-28', 1)
+          if s == before:
               raise SystemExit('MCP discover assertion patch target not found')
+          p.write_text(s)
+
+          # Compare writable nested paths using the canonical existing root on macOS.
+          p = Path('internal/tool/registry_test.go')
+          s = p.read_text()
+          old = 'if got != target { t.Fatalf("got %q want %q", got, target) }'
+          new = '''canonicalRoot, err := filepath.EvalSymlinks(root)
+          if err != nil { t.Fatal(err) }
+          want := filepath.Join(canonicalRoot, "a", "b", "file.txt")
+          if got != want { t.Fatalf("got %q want %q", got, want) }'''
+          if old not in s:
+              raise SystemExit('nested writable test patch target not found')
           s = s.replace(old, new, 1)
           p.write_text(s)
           PY
