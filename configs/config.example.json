@@ -1,6 +1,6 @@
 {
   "name": "KINGAIBOT",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "server": {
     "listen": "127.0.0.1:18888",
     "base_url": "",
