@@ -69,6 +69,24 @@ func TestAtomicWriteAllowedFileNested(t *testing.T) {
 	}
 }
 
+func TestAtomicWriteAllowedFileOverwritesExisting(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "result.txt")
+	if err := AtomicWriteAllowedFile(target, []string{root}, []byte("first"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AtomicWriteAllowedFile(target, []string{root}, []byte("second"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "second" {
+		t.Fatalf("overwrite got %q", got)
+	}
+}
+
 func TestAtomicWriteAllowedFileRejectsSymlinkEscape(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation permissions vary on Windows")
