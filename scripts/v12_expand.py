@@ -72,7 +72,6 @@ func (r *Registry) fileDelete(raw json.RawMessage) (string, error) {
 s = s[:insert_at] + methods + s[insert_at:]
 p.write_text(s)
 
-# Safe defaults for new capabilities.
 p = Path("configs/config.example.json")
 s = p.read_text()
 anchor = '''      "file_write": "ask",
@@ -85,11 +84,12 @@ extra = anchor + '''      "file_stat": "allow",
 s = replace_once(s, anchor, extra, "example policies")
 p.write_text(s)
 
-# Product release branding: preserve CLI names for compatibility, but make the
-# distributable package name KINGAIBOT.
+# Product archive branding. Workflow YAML is intentionally not modified from
+# the low-privilege Actions token; release.yml is updated separately through
+# the repository control plane after this validated migration lands.
 for name in [
     "scripts/build-release.sh", "scripts/install.sh", "scripts/update.sh",
-    "scripts/install.ps1", "scripts/update.ps1", ".github/workflows/release.yml",
+    "scripts/install.ps1", "scripts/update.ps1",
 ]:
     p = Path(name)
     s = p.read_text().replace("king-agent-os_", "kingaibot_")
@@ -97,7 +97,6 @@ for name in [
         s = s.replace("${GITHUB_REF_NAME:-1.1.0}", "${GITHUB_REF_NAME:-1.2.0}")
     p.write_text(s)
 
-# Regression tests through the tool implementation.
 p = Path("internal/tool/registry_test.go")
 s = p.read_text()
 if "TestSafeFileManagementTools" not in s:
