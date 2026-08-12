@@ -3,6 +3,8 @@ package storage
 import (
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -17,7 +19,7 @@ type EntryInfo struct {
 }
 
 func StatAllowedPath(path string, roots []string) (EntryInfo, error) {
-	rootPath, rel, err := matchAllowedRoot(path, roots)
+	rootPath, rel, err := matchAllowedRootOrSelf(path, roots)
 	if err != nil {
 		return EntryInfo{}, err
 	}
@@ -34,7 +36,7 @@ func StatAllowedPath(path string, roots []string) (EntryInfo, error) {
 }
 
 func ListAllowedDir(path string, roots []string) ([]EntryInfo, error) {
-	rootPath, rel, err := matchAllowedRoot(path, roots)
+	rootPath, rel, err := matchAllowedRootOrSelf(path, roots)
 	if err != nil {
 		return nil, err
 	}
@@ -99,6 +101,34 @@ func RemoveAllowed(path string, roots []string) error {
 	}
 	defer root.Close()
 	return root.Remove(rel)
+}
+
+func matchAllowedRootOrSelf(path string, roots []string) (string, string, error) {
+	if rootPath, rel, err := matchAllowedRoot(path, roots); err == nil {
+		return rootPath, rel, nil
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", "", errors.New("path required")
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", "", err
+	}
+	absPath = filepath.Clean(absPath)
+	for _, configuredRoot := range roots {
+		if strings.TrimSpace(configuredRoot) == "" {
+			continue
+		}
+		rootPath, err := filepath.Abs(configuredRoot)
+		if err != nil {
+			continue
+		}
+		rootPath = filepath.Clean(rootPath)
+		if absPath == rootPath {
+			return rootPath, ".", nil
+		}
+	}
+	return "", "", errors.New("path outside allowed roots")
 }
 
 func entryInfo(info os.FileInfo) EntryInfo {
