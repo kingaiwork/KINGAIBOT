@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.2.1 - 2026-08-12
+
+### English
+
+Supply-chain publication patch over V1.2.0:
+
+- Replaced the hand-written CycloneDX JSON generator with the official `CycloneDX/cyclonedx-gomod` generator pinned to v1.10.0.
+- Preserved reproducible-build behavior by normalizing release timestamp and KINGAIBOT version metadata after standards-compliant BOM generation.
+- Fixed the controlled tag-first release dispatcher to pass the repository explicitly when invoking the tagged workflow.
+- Kept `v1.2.0` immutable after its publication pipeline correctly stopped at SBOM validation; no failed or unsigned binary Release was published from that tag.
+- Bumped runtime and example configuration identity to KINGAIBOT 1.2.1.
+- V1.2.1 retains all V1.2 execution-layer and security hardening features unchanged.
+
+### 中文
+
+V1.2.0 之上的供应链发布修复版：
+
+- 不再手写 CycloneDX JSON，改用 CycloneDX 官方 `CycloneDX/cyclonedx-gomod` 生成器，并固定到 v1.10.0。
+- 在标准 SBOM 生成后仅规范化发布时间戳和 KINGAIBOT 版本元数据，继续保持可复现构建目标。
+- 修复受控 Tag-first Release 调度器，触发 Tag 工作流时显式指定仓库。
+- 保持 `v1.2.0` Tag 不可移动；该版本发布流程在 SBOM 验证处正确停止，没有发布失败或未签名的二进制 Release。
+- Runtime 和示例配置版本更新为 KINGAIBOT 1.2.1。
+- V1.2.1 完整保留 V1.2 已通过验证的执行层功能和安全加固。
+
 ## 1.2.0 - 2026-08-12
 
 ### English
