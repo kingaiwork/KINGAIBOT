@@ -1,0 +1,93 @@
+{
+  "name": "KINGAIBOT",
+  "version": "1.1.0",
+  "server": {
+    "listen": "127.0.0.1:18888",
+    "base_url": "",
+    "admin_token_env": "KINGAGENT_ADMIN_TOKEN",
+    "allowed_origins": [],
+    "mcp_token_env": "KINGAGENT_MCP_TOKEN",
+    "a2a_token_env": "KINGAGENT_A2A_TOKEN"
+  },
+  "runtime": {
+    "data_dir": "./data",
+    "workspace_dir": "./data/workspace",
+    "max_steps": 12,
+    "worker_count": 2,
+    "max_request_bytes": 1048576,
+    "request_timeout_seconds": 120,
+    "task_timeout_seconds": 600,
+    "queue_capacity": 1024,
+    "audit_verify_interval_seconds": 300
+  },
+  "providers": [
+    {
+      "name": "openai-primary",
+      "type": "openai-compatible",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-5.6",
+      "priority": 10,
+      "enabled": true,
+      "allow_private_network": false,
+      "allow_insecure_http": false
+    },
+    {
+      "name": "fallback-compatible",
+      "type": "openai-compatible",
+      "base_url": "https://example.invalid/v1",
+      "api_key_env": "FALLBACK_API_KEY",
+      "model": "replace-me",
+      "priority": 20,
+      "enabled": false,
+      "allow_private_network": false,
+      "allow_insecure_http": false
+    }
+  ],
+  "security": {
+    "default_tool_policy": "deny",
+    "tool_policies": {
+      "system_info": "allow",
+      "file_read": "allow",
+      "file_write": "ask",
+      "http_get": "ask",
+      "shell_exec": "deny",
+      "mcp_tools_list": "allow",
+      "mcp_tools_call": "ask",
+      "a2a_send": "ask"
+    },
+    "shell_allowlist": [],
+    "http_allowed_hosts": [
+      "api.github.com",
+      "github.com",
+      "raw.githubusercontent.com"
+    ],
+    "allow_private_network": false,
+    "file_read_roots": [
+      "./data/workspace"
+    ],
+    "file_write_roots": [
+      "./data/workspace"
+    ]
+  },
+  "evolution": {
+    "enabled": true,
+    "mode": "proposal-only",
+    "repository": "",
+    "allow_prerelease": false,
+    "check_interval_minutes": 360
+  },
+  "protocols": {
+    "mcp": true,
+    "a2a": true,
+    "mcp_servers": [],
+    "a2a_peers": []
+  },
+  "memory": {
+    "enabled": true,
+    "max_records": 5000,
+    "max_context_chars": 8000,
+    "store_task_inputs": false,
+    "store_task_outputs": true
+  }
+}
