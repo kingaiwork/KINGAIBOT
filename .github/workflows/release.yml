@@ -38,7 +38,7 @@ jobs:
             -f ref="refs/tags/${TAG}" \
             -f sha="${GITHUB_SHA}" >/dev/null
           echo "Created immutable tag ${TAG} at ${GITHUB_SHA}."
-          gh workflow run release.yml --ref "$TAG"
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
           echo "Dispatched signed release workflow at refs/tags/${TAG}."
 
   release:
