@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.3.0 - 2026-08-13
+
+### English
+
+Cross-platform client and device-identity expansion:
+
+- Added the first shared KINGAIBOT Control Center for Windows, macOS and Android using Tauri 2 + React + TypeScript + Rust.
+- Added a Rust-side secure transport boundary: remote HTTPS enforcement, loopback-only plaintext development mode, no authenticated redirects, bounded responses and validated resource identifiers.
+- Added Control Center views for runtime readiness, durable tasks, exact-action approvals, controlled-evolution proposals and trusted-device administration.
+- Added Android biometric confirmation before approving sensitive actions.
+- Added Stronghold-backed encrypted local server/device profile storage.
+- Split Tauri desktop/mobile capabilities and intentionally omitted frontend filesystem, shell and process permissions.
+- Added one-time short-lived Device Pairing so ordinary clients do not need to retain the server Admin Token.
+- Added 256-bit Device Tokens with explicit task/approval/evolution scopes; only SHA-256 hashes of pairing/device secrets are persisted server-side.
+- Added per-device revocation without rotating the global Admin Token.
+- Added administrator APIs/UI to create pairings, list trusted devices and revoke individual devices.
+- Kept the Admin Token as a trusted superuser/bootstrap credential rather than the normal long-lived mobile/desktop identity.
+- Added locked npm/Cargo dependency graphs and dedicated client CI.
+- Validated Linux security-core, Windows native compile, macOS native compile and a real Android Debug package build on GitHub-hosted runners.
+- Revalidated the integrated Go Runtime with Go 1.26.5 format, unit, vet and race gates; Device Identity also passed formal CI and CodeQL before integration.
+- Expanded the bilingual product/client documentation to describe KINGAIBOT as the future terminal execution layer for the KING AI intelligent-lifeform system.
+
+### 中文
+
+跨平台客户端与设备身份扩展版本：
+
+- 新增第一套统一 KINGAIBOT Control Center，基于 Tauri 2 + React + TypeScript + Rust，面向 Windows、macOS 与 Android。
+- 新增 Rust 安全传输边界：远程强制 HTTPS、明文仅允许本机 loopback 开发、携带凭据禁止自动重定向、响应大小限制与资源 ID 校验。
+- Control Center 新增 Runtime readiness、持久任务、精确动作审批、受控进化提案和可信设备管理界面。
+- Android 敏感审批前加入系统生物识别确认。
+- 使用 Stronghold 加密保存本机服务器/设备 Profile。
+- Windows/macOS 与 Android 使用独立 Tauri Capability，并故意不授予前端文件系统、Shell 和进程权限。
+- 新增短时一次性 Device Pairing，普通客户端不再需要长期保存服务器 Admin Token。
+- 新增 256-bit Device Token 与任务/审批/进化 Scope；服务器磁盘只保存 Pairing/Device Secret 的 SHA-256 哈希。
+- 支持单设备撤销，无需轮换全局 Admin Token。
+- 新增管理员创建 Pairing、查看可信设备和撤销单设备的 API/UI。
+- Admin Token 继续作为可信管理员/首次引导超级权限凭据，而不是普通手机/桌面端长期身份。
+- npm/Cargo 依赖图锁定，并新增独立 Client CI。
+- GitHub 原生 Runner 已验证 Linux 安全核心、Windows 原生编译、macOS 原生编译以及真实 Android Debug Package 构建。
+- 整合后的 Go Runtime 再次通过 Go 1.26.5 格式、单元、vet、race；Device Identity 在整合前也已通过正式 CI 与 CodeQL。
+- 扩展中英文产品/客户端文档，进一步明确 KINGAIBOT 将作为 KING AI 智慧生命体未来的终端执行层。
+
 ## 1.2.0 - 2026-08-12
 
 ### English
