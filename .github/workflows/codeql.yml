@@ -1,7 +1,7 @@
 name: CodeQL
 on:
   push:
-    branches: [main]
+    branches: [main, agent/v1.3-integration]
   pull_request:
   schedule:
     - cron: '17 9 * * 3'

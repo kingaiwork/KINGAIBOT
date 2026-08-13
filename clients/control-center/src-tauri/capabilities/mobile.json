@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile-control",
+  "description": "Minimal local UI permissions for the KINGAIBOT Android companion client, including biometric approval confirmation.",
+  "local": true,
+  "windows": ["main"],
+  "platforms": ["android"],
+  "permissions": [
+    "core:default",
+    "stronghold:default",
+    "notification:default",
+    "os:default",
+    "biometric:default"
+  ]
+}

@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [main]
+    branches: [main, agent/v1.3-integration]
   pull_request:
 permissions:
   contents: read
@@ -85,5 +85,5 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Build hardened container
-        run: docker build --pull -f deploy/docker/Dockerfile .
+      - name: Docker build
+        run: docker build -f deploy/docker/Dockerfile -t kingaibot:ci .

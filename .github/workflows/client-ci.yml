@@ -1,0 +1,155 @@
+name: Client CI
+
+on:
+  push:
+    branches:
+      - agent/v1.3-cross-platform-clients
+      - agent/v1.3-integration
+    paths:
+      - 'clients/control-center/**'
+      - '.github/workflows/client-ci.yml'
+  pull_request:
+    paths:
+      - 'clients/control-center/**'
+      - '.github/workflows/client-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-client:
+    name: Linux frontend + Rust security core
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: clients/control-center
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: clients/control-center/package-lock.json
+      - name: Install Linux Tauri prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Install stable Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup component add rustfmt clippy
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build frontend
+        run: npm run build
+      - name: Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - name: Rust compile
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets
+      - name: Rust tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib
+      - name: Rust lint
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+  macos-client:
+    name: macOS native compile
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: clients/control-center
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: clients/control-center/package-lock.json
+      - name: Install stable Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+      - name: Install and build frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Compile Tauri backend
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets
+
+  windows-client:
+    name: Windows native compile
+    runs-on: windows-2025
+    defaults:
+      run:
+        working-directory: clients/control-center
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: clients/control-center/package-lock.json
+      - name: Install stable Rust
+        shell: pwsh
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+      - name: Install and build frontend
+        shell: pwsh
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Compile Tauri backend
+        shell: pwsh
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets
+
+  android-client:
+    name: Android debug build
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: clients/control-center
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: clients/control-center/package-lock.json
+      - name: Install stable Rust and Android targets
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+      - name: Resolve Android NDK
+        run: |
+          set -euo pipefail
+          if [[ -n "${ANDROID_NDK_LATEST_HOME:-}" ]]; then
+            echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          elif [[ -n "${ANDROID_NDK_ROOT:-}" ]]; then
+            echo "NDK_HOME=$ANDROID_NDK_ROOT" >> "$GITHUB_ENV"
+          elif [[ -n "${ANDROID_NDK_HOME:-}" ]]; then
+            echo "NDK_HOME=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
+          else
+            echo 'No preinstalled Android NDK found on runner' >&2
+            exit 1
+          fi
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Initialize Android project
+        run: npx tauri android init
+      - name: Build Android debug package
+        run: npx tauri android build --debug

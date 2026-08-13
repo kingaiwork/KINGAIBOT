@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="KINGAIBOT K mark">
+  <defs>
+    <radialGradient id="glow" cx="38%" cy="32%" r="78%">
+      <stop offset="0" stop-color="#4c392d"/>
+      <stop offset="0.55" stop-color="#261f1a"/>
+      <stop offset="1" stop-color="#171411"/>
+    </radialGradient>
+    <linearGradient id="warm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff7ec"/>
+      <stop offset="1" stop-color="#dfc1a0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="220" fill="url(#glow)"/>
+  <circle cx="512" cy="512" r="330" fill="none" stroke="#b6835d" stroke-opacity="0.12" stroke-width="2"/>
+  <circle cx="512" cy="512" r="245" fill="none" stroke="#b6835d" stroke-opacity="0.09" stroke-width="2"/>
+  <path d="M312 218h94v588h-94z" rx="28" fill="url(#warm)"/>
+  <path d="M390 510 686 218h118L486 536z" fill="url(#warm)"/>
+  <path d="m392 505 100-35 324 336H687z" fill="url(#warm)"/>
+  <circle cx="790" cy="205" r="24" fill="#ca966d"/>
+</svg>
