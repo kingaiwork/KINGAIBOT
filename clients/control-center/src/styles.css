@@ -147,3 +147,32 @@ summary { cursor: pointer; color: #6d655d; font-size: 12px; font-weight: 700; }
   .mobile-nav { background: rgba(28,25,22,.94); }
   .empty h3 { color: #ddd5cc; }
 }
+
+
+/* V1.3 pairing and device-identity surfaces */
+.mode-heading { display: grid; gap: 6px; margin-bottom: 3px; }
+.mode-heading h2 { margin: 0; font-size: 19px; letter-spacing: -.025em; }
+.mode-heading p { margin: 0; color: var(--muted); font-size: 13px; font-weight: 500; line-height: 1.55; }
+.mode-badge { justify-self: start; display: inline-flex; border-radius: 999px; padding: 5px 9px; background: #e1efe5; color: #356b4d; font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.pairing-form { margin-top: 28px; padding: 20px; border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,.35); }
+.existing-credential-form { padding: 4px 0 0; }
+.connection-divider { display: flex; align-items: center; gap: 12px; margin: 22px 0 3px; color: #91887e; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.connection-divider::before, .connection-divider::after { content: ''; height: 1px; flex: 1; background: var(--line); }
+.two-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.device-admin-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.restricted-panel { border-style: dashed; }
+.pairing-card { border-color: rgba(125,93,32,.18); }
+.pairing-secret-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
+.pairing-secret-grid label { min-width: 0; }
+.pairing-secret-grid code { display: block; margin-top: 5px; padding: 11px; border-radius: 12px; background: #f4f0e9; color: #4c443c; overflow-wrap: anywhere; user-select: all; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+@media (max-width: 720px) {
+  .two-field-grid, .pairing-secret-grid { grid-template-columns: 1fr; }
+  .device-admin-head { align-items: stretch; flex-direction: column; }
+  .pairing-form { padding: 16px; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .pairing-form { background: rgba(255,255,255,.025); }
+  .pairing-secret-grid code { background: #211e1b; color: #ded6cc; }
+}

@@ -12,9 +12,11 @@ import {
 } from './api';
 import { loadSecureProfile, notify, requireApprovalConfirmation, saveSecureProfile } from './security';
 import type { Approval, EvolutionProposal, ServerSummary, Task } from './types';
+import PairDevicePanel from './PairDevicePanel';
+import DevicesPanel from './DevicesPanel';
 import './styles.css';
 
-type View = 'overview' | 'tasks' | 'approvals' | 'evolution';
+type View = 'overview' | 'tasks' | 'approvals' | 'evolution' | 'devices';
 
 const formatTime = (value?: string) => {
   if (!value) return '—';
@@ -95,7 +97,7 @@ export default function App() {
   const onConnect = async (event: FormEvent) => {
     event.preventDefault();
     if (token.trim().length < 32) {
-      setError('Admin token must contain at least 32 characters.');
+      setError('Access token must contain at least 32 characters.');
       return;
     }
     if (persistProfile && vaultPassword.length < 8) {
@@ -181,13 +183,29 @@ export default function App() {
           <p className="eyebrow">KING AI · Execution Layer</p>
           <h1>KINGAIBOT</h1>
           <p className="lede">A quiet control surface for durable agents, approvals and real-world execution.</p>
-          <form onSubmit={onConnect} className="connect-form">
+          <PairDevicePanel
+            initialServerUrl={serverUrl}
+            busy={busy}
+            setBusy={setBusy}
+            setError={setError}
+            onConnected={(result, url) => {
+              setServerUrl(url);
+              setSummary(result);
+              setConnected(true);
+            }}
+          />
+          <div className="connection-divider"><span>or use an existing credential</span></div>
+          <form onSubmit={onConnect} className="connect-form existing-credential-form">
+            <div className="mode-heading">
+              <h2>Existing access token</h2>
+              <p>Use a previously paired Device Token for routine operation, or an Admin Token only on an administrator workstation.</p>
+            </div>
             <label>
               Server
               <input value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} autoCapitalize="none" autoCorrect="off" />
             </label>
             <label>
-              Admin token
+              Access token
               <input type="password" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" />
             </label>
             <label>
@@ -196,7 +214,7 @@ export default function App() {
             </label>
             <label className="check-row">
               <input type="checkbox" checked={persistProfile} onChange={(e) => setPersistProfile(e.target.checked)} />
-              <span>Save this server profile in the encrypted device vault</span>
+              <span>Save this credential in the encrypted device vault</span>
             </label>
             {error && <div className="error-banner">{error}</div>}
             <div className="connect-actions">
@@ -223,6 +241,7 @@ export default function App() {
             <NavButton current={view} id="tasks" label="Tasks" badge={activeTasks.length} onClick={setView} />
             <NavButton current={view} id="approvals" label="Approvals" badge={pendingApprovals.length} onClick={setView} />
             <NavButton current={view} id="evolution" label="Evolution" badge={proposals.length} onClick={setView} />
+            <NavButton current={view} id="devices" label="Devices" onClick={setView} />
           </nav>
         </div>
         <div className="server-foot">
@@ -289,6 +308,10 @@ export default function App() {
           </section>
         )}
 
+        {view === 'devices' && (
+          <DevicesPanel busy={busy} setBusy={setBusy} setError={setError} />
+        )}
+
         {view === 'evolution' && (
           <section className="card-list">
             <div className="notice-panel"><strong>Controlled evolution</strong><p>These are improvement proposals, not self-authorized code changes. Production activation still requires testing, review and the release pipeline.</p></div>
@@ -316,7 +339,7 @@ export default function App() {
 }
 
 function titleFor(view: View) {
-  return { overview: 'Control Center', tasks: 'Durable Tasks', approvals: 'Action Approvals', evolution: 'Evolution Proposals' }[view];
+  return { overview: 'Control Center', tasks: 'Durable Tasks', approvals: 'Action Approvals', evolution: 'Evolution Proposals', devices: 'Trusted Devices' }[view];
 }
 
 function NavButton({ current, id, label, badge, onClick }: { current: View; id: View; label: string; badge?: number; onClick: (view: View) => void }) {

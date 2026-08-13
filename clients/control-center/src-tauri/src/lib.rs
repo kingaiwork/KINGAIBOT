@@ -272,7 +272,10 @@ async fn pair_device(
     let base_url = normalize_server_url(&args.server_url)?;
     validate_id(args.pairing_id.trim())?;
     let pairing_secret = args.pairing_secret.trim();
-    if pairing_secret.len() < 32 || pairing_secret.len() > 256 || pairing_secret.chars().any(char::is_whitespace) {
+    if pairing_secret.len() < 32
+        || pairing_secret.len() > 256
+        || pairing_secret.chars().any(char::is_whitespace)
+    {
         return Err("invalid pairing secret".into());
     }
     let device_name = args.device_name.trim();
@@ -291,7 +294,7 @@ async fn pair_device(
 
     let client = secure_client()?;
     let response = client
-        .post(endpoint(&base_url, &["v1", "device-pair"])? )
+        .post(endpoint(&base_url, &["v1", "device-pair"])?)
         .header("Accept", "application/json")
         .json(&json!({
             "pairing_id": args.pairing_id.trim(),
@@ -306,7 +309,8 @@ async fn pair_device(
     if !status.is_success() {
         return Err(format!("pairing rejected with HTTP {}", status.as_u16()));
     }
-    let body: Value = serde_json::from_slice(&bytes).map_err(|e| format!("invalid pairing response: {e}"))?;
+    let body: Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("invalid pairing response: {e}"))?;
     let device_token = body
         .get("device_token")
         .and_then(Value::as_str)

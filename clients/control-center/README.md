@@ -9,7 +9,8 @@ KINGAIBOT Control Center is the human-facing cross-platform client for the KINGA
 
 ### Current V1.3 capabilities
 
-- Connect to a local or remote KINGAIBOT Runtime.
+- Pair a new Windows/macOS/Android device with a short-lived one-time server pairing.
+- Connect to a local or remote KINGAIBOT Runtime with a revocable Device Token or administrator credential.
 - HTTPS required for remote servers; loopback HTTP allowed for local development/runtime mode.
 - Verify authentication before retaining an in-memory session.
 - List/create/cancel durable tasks.
@@ -85,7 +86,7 @@ For remote production deployments:
 https://agent.example.com
 ```
 
-The current V1.3 client can use the Runtime admin token. This is an interim bootstrap model. V1.4 replaces routine remote use with short-lived QR pairing and revocable device-scoped credentials.
+V1.3 now supports one-time server pairing and revocable device-scoped credentials. Admin Token login remains available for trusted administrator workstations and device provisioning. QR-camera enrollment is the next UX layer; the security primitive is already the one-time Pairing ID + secret flow.
 
 ### Local desktop Runtime
 
@@ -168,7 +169,7 @@ http://127.0.0.1:18888
 https://agent.example.com
 ```
 
-V1.3 暂时允许使用 Runtime Admin Token 完成早期联调。这只是过渡方案；V1.4 将改为 QR 短时配对 + 可撤销设备级凭据，让手机和桌面不再长期持有服务器管理员身份。
+V1.3 已加入一次性服务器配对与可撤销设备级凭据。Admin Token 登录仅保留给可信管理员工作站和设备管理；下一步 QR 扫码只是把现有 Pairing ID + Secret 流程做成更自然的交互，不再把管理员密钥复制到手机或普通桌面端。
 
 ### 桌面本机 Runtime
 
