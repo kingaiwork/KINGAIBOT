@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kingaiwork/KINGAIBOT/internal/config"
+	"github.com/kingaiwork/KINGAIBOT/internal/device"
 	karuntime "github.com/kingaiwork/KINGAIBOT/internal/runtime"
 	"github.com/kingaiwork/KINGAIBOT/internal/task"
 	"github.com/kingaiwork/KINGAIBOT/internal/tool"
@@ -24,11 +25,16 @@ type Server struct {
 	cfg     *config.Config
 	rt      *karuntime.Runtime
 	tools   *tool.Registry
+	devices *device.Store
 	limiter *limiter
 }
 
-func New(cfg *config.Config, rt *karuntime.Runtime, tools *tool.Registry) *Server {
-	return &Server{cfg: cfg, rt: rt, tools: tools, limiter: newLimiter(120, time.Minute)}
+func New(cfg *config.Config, rt *karuntime.Runtime, tools *tool.Registry, deviceStores ...*device.Store) *Server {
+	var devices *device.Store
+	if len(deviceStores) > 0 {
+		devices = deviceStores[0]
+	}
+	return &Server{cfg: cfg, rt: rt, tools: tools, devices: devices, limiter: newLimiter(120, time.Minute)}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -39,13 +45,18 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /a2a", s.authEnv(s.cfg.Server.A2ATokenEnv, http.HandlerFunc(s.a2a)))
 	mux.Handle("POST /mcp", s.authEnv(s.cfg.Server.MCPTokenEnv, http.HandlerFunc(s.mcp)))
 	admin := func(h http.Handler) http.Handler { return s.authEnv(s.cfg.Server.AdminTokenEnv, h) }
-	mux.Handle("POST /v1/tasks", admin(http.HandlerFunc(s.createTask)))
-	mux.Handle("GET /v1/tasks", admin(http.HandlerFunc(s.listTasks)))
-	mux.Handle("GET /v1/tasks/{id}", admin(http.HandlerFunc(s.getTask)))
-	mux.Handle("POST /v1/tasks/{id}/cancel", admin(http.HandlerFunc(s.cancelTask)))
-	mux.Handle("GET /v1/approvals", admin(http.HandlerFunc(s.listApprovals)))
-	mux.Handle("POST /v1/approvals/{id}", admin(http.HandlerFunc(s.decideApproval)))
-	mux.Handle("GET /v1/evolution/proposals", admin(http.HandlerFunc(s.listEvolution)))
+	control := func(scope string, h http.Handler) http.Handler { return s.authScoped(scope, h) }
+	mux.Handle("POST /v1/device-pair", http.HandlerFunc(s.pairDevice))
+	mux.Handle("POST /v1/devices/pairings", admin(http.HandlerFunc(s.createPairing)))
+	mux.Handle("GET /v1/devices", admin(http.HandlerFunc(s.listDevices)))
+	mux.Handle("POST /v1/devices/{id}/revoke", admin(http.HandlerFunc(s.revokeDevice)))
+	mux.Handle("POST /v1/tasks", control(device.ScopeTasksCreate, http.HandlerFunc(s.createTask)))
+	mux.Handle("GET /v1/tasks", control(device.ScopeTasksRead, http.HandlerFunc(s.listTasks)))
+	mux.Handle("GET /v1/tasks/{id}", control(device.ScopeTasksRead, http.HandlerFunc(s.getTask)))
+	mux.Handle("POST /v1/tasks/{id}/cancel", control(device.ScopeTasksCancel, http.HandlerFunc(s.cancelTask)))
+	mux.Handle("GET /v1/approvals", control(device.ScopeApprovalsRead, http.HandlerFunc(s.listApprovals)))
+	mux.Handle("POST /v1/approvals/{id}", control(device.ScopeApprovalsDecide, http.HandlerFunc(s.decideApproval)))
+	mux.Handle("GET /v1/evolution/proposals", control(device.ScopeEvolutionRead, http.HandlerFunc(s.listEvolution)))
 	return s.security(s.cors(s.limit(mux)))
 }
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
@@ -123,6 +134,112 @@ func (s *Server) authEnv(envName string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) authScoped(scope string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		expected := os.Getenv(s.cfg.Server.AdminTokenEnv)
+		if len(expected) < 32 {
+			problem(w, 500, "server_misconfigured", "required authentication secret is missing or too short")
+			return
+		}
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") {
+			problem(w, 401, "unauthorized", "bearer token required")
+			return
+		}
+		got := strings.TrimPrefix(auth, "Bearer ")
+		if len(got) == len(expected) && subtle.ConstantTimeCompare([]byte(got), []byte(expected)) == 1 {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if s.devices != nil {
+			if _, err := s.devices.Authorize(got, scope); err == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+		problem(w, http.StatusForbidden, "forbidden", "credential is invalid or lacks the required scope")
+	})
+}
+
+func (s *Server) createPairing(w http.ResponseWriter, r *http.Request) {
+	if s.devices == nil {
+		problem(w, http.StatusServiceUnavailable, "device_identity_unavailable", "device identity store is unavailable")
+		return
+	}
+	var in struct {
+		Scopes           []string `json:"scopes"`
+		ExpiresInSeconds int      `json:"expires_in_seconds"`
+	}
+	if decode(r, w, 64<<10, &in) != nil {
+		return
+	}
+	if in.ExpiresInSeconds < 0 {
+		problem(w, http.StatusBadRequest, "invalid_pairing_ttl", "expires_in_seconds cannot be negative")
+		return
+	}
+	pairing, secret, err := s.devices.CreatePairing(in.Scopes, time.Duration(in.ExpiresInSeconds)*time.Second)
+	if err != nil {
+		problem(w, http.StatusBadRequest, "pairing_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"pairing_id":     pairing.ID,
+		"pairing_secret": secret,
+		"scopes":         pairing.Scopes,
+		"expires_at":     pairing.ExpiresAt,
+	})
+}
+
+func (s *Server) pairDevice(w http.ResponseWriter, r *http.Request) {
+	if s.devices == nil {
+		problem(w, http.StatusServiceUnavailable, "device_identity_unavailable", "device identity store is unavailable")
+		return
+	}
+	var in struct {
+		PairingID     string `json:"pairing_id"`
+		PairingSecret string `json:"pairing_secret"`
+		DeviceName    string `json:"device_name"`
+		Platform      string `json:"platform"`
+	}
+	if decode(r, w, 64<<10, &in) != nil {
+		return
+	}
+	d, token, err := s.devices.ConsumePairing(in.PairingID, in.PairingSecret, in.DeviceName, in.Platform)
+	if err != nil {
+		problem(w, http.StatusUnauthorized, "pairing_rejected", "pairing is invalid, expired, or already consumed")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"device":       d,
+		"device_token": token,
+		"token_type":   "Bearer",
+	})
+}
+
+func (s *Server) listDevices(w http.ResponseWriter, _ *http.Request) {
+	if s.devices == nil {
+		problem(w, http.StatusServiceUnavailable, "device_identity_unavailable", "device identity store is unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"devices": s.devices.List()})
+}
+
+func (s *Server) revokeDevice(w http.ResponseWriter, r *http.Request) {
+	if s.devices == nil {
+		problem(w, http.StatusServiceUnavailable, "device_identity_unavailable", "device identity store is unavailable")
+		return
+	}
+	if err := s.devices.Revoke(r.PathValue("id")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			problem(w, http.StatusNotFound, "not_found", "device not found")
+			return
+		}
+		problem(w, http.StatusBadRequest, "revoke_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {

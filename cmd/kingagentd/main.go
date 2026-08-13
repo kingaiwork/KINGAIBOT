@@ -16,6 +16,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/api"
 	"github.com/kingaiwork/KINGAIBOT/internal/approval"
 	"github.com/kingaiwork/KINGAIBOT/internal/config"
+	"github.com/kingaiwork/KINGAIBOT/internal/device"
 	"github.com/kingaiwork/KINGAIBOT/internal/eventlog"
 	"github.com/kingaiwork/KINGAIBOT/internal/evolution"
 	"github.com/kingaiwork/KINGAIBOT/internal/memory"
@@ -26,7 +27,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/tool"
 )
 
-var version = "1.2.0"
+var version = "1.3.0"
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "configuration file")
@@ -52,6 +53,8 @@ func main() {
 	must(mustErr)
 	es, mustErr := evolution.New(filepath.Join(cfg.Runtime.DataDir, "evolution"))
 	must(mustErr)
+	ds, mustErr := device.New(filepath.Join(cfg.Runtime.DataDir, "devices"))
+	must(mustErr)
 	pe := policy.New(cfg.Security.DefaultToolPolicy, cfg.Security.ToolPolicies)
 	tr := tool.New(cfg, pe, as, el)
 	pc := provider.New(cfg.Providers, time.Duration(cfg.Runtime.RequestTimeoutSeconds)*time.Second)
@@ -59,7 +62,7 @@ func main() {
 	rt := karuntime.New(ts, as, el, ms, ae, es, cfg)
 	defer rt.Close()
 	must(rt.Recover())
-	srv := &http.Server{Addr: cfg.Server.Listen, Handler: api.New(cfg, rt, tr).Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
+	srv := &http.Server{Addr: cfg.Server.Listen, Handler: api.New(cfg, rt, tr, ds).Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
 		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
