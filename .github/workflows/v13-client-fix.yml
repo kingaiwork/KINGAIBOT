@@ -21,7 +21,7 @@ jobs:
       - name: Install Tauri prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev librsvg2-bin patchelf
           rustup update stable --no-self-update
           rustup default stable
           rustup component add rustfmt clippy
@@ -30,7 +30,8 @@ jobs:
         run: |
           set -euo pipefail
           npm install --no-audit --no-fund
-          cp src-tauri/icons/icon.png /tmp/kingaibot-icon.png
+          rsvg-convert -w 1024 -h 1024 src-tauri/icons/kingaibot-source.svg > /tmp/kingaibot-icon.png
+          file /tmp/kingaibot-icon.png
           npx tauri icon /tmp/kingaibot-icon.png
           python3 - <<'PY'
           from pathlib import Path
