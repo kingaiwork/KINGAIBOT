@@ -1,7 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   ApprovalListResponse,
+  DeviceListResponse,
   EvolutionListResponse,
+  PairDeviceResult,
+  PairingResult,
   ServerSummary,
   Task,
   TaskListResponse,
@@ -10,6 +13,18 @@ import type {
 export async function connectServer(serverUrl: string, token: string): Promise<ServerSummary> {
   return invoke<ServerSummary>('connect_server', {
     args: { serverUrl, token },
+  });
+}
+
+export async function pairDevice(
+  serverUrl: string,
+  pairingId: string,
+  pairingSecret: string,
+  deviceName: string,
+  platform?: string,
+): Promise<PairDeviceResult> {
+  return invoke<PairDeviceResult>('pair_device', {
+    args: { serverUrl, pairingId, pairingSecret, deviceName, platform },
   });
 }
 
@@ -43,4 +58,21 @@ export async function decideApproval(id: string, status: 'approved' | 'denied'):
 
 export async function listEvolution(): Promise<EvolutionListResponse> {
   return invoke<EvolutionListResponse>('list_evolution');
+}
+
+export async function createDevicePairing(
+  scopes: string[],
+  expiresInSeconds = 300,
+): Promise<PairingResult> {
+  return invoke<PairingResult>('create_device_pairing', {
+    args: { scopes, expiresInSeconds },
+  });
+}
+
+export async function listDevices(): Promise<DeviceListResponse> {
+  return invoke<DeviceListResponse>('list_devices');
+}
+
+export async function revokeDevice(id: string): Promise<void> {
+  await invoke('revoke_device', { id });
 }
