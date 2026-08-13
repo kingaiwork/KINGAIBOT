@@ -51,7 +51,9 @@ fn normalize_server_url(raw: &str) -> Result<Url, String> {
         return Err("server URL must point to the server origin, without an API path".into());
     }
 
-    let host = url.host_str().ok_or_else(|| "server URL requires a hostname".to_string())?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| "server URL requires a hostname".to_string())?;
     match url.scheme() {
         "https" => {}
         "http" if is_loopback_host(host) => {}
@@ -65,7 +67,9 @@ fn normalize_server_url(raw: &str) -> Result<Url, String> {
 
 fn is_loopback_host(host: &str) -> bool {
     host.eq_ignore_ascii_case("localhost")
-        || IpAddr::from_str(host).map(|ip| ip.is_loopback()).unwrap_or(false)
+        || IpAddr::from_str(host)
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false)
 }
 
 fn endpoint(base: &Url, segments: &[&str]) -> Result<Url, String> {
@@ -106,13 +110,19 @@ fn validate_id(id: &str) -> Result<(), String> {
     }
 }
 
-async fn read_response_limited(mut response: reqwest::Response) -> Result<(reqwest::StatusCode, Vec<u8>), String> {
+async fn read_response_limited(
+    mut response: reqwest::Response,
+) -> Result<(reqwest::StatusCode, Vec<u8>), String> {
     let status = response.status();
     if response.content_length().unwrap_or(0) > MAX_RESPONSE_BYTES as u64 {
         return Err("server response exceeds 4 MiB limit".into());
     }
     let mut out = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|e| format!("response read failed: {e}"))? {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("response read failed: {e}"))?
+    {
         if out.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
             return Err("server response exceeds 4 MiB limit".into());
         }
@@ -136,12 +146,19 @@ async fn api_json(
     if let Some(body) = body {
         request = request.json(&body);
     }
-    let response = request.send().await.map_err(|e| format!("request failed: {e}"))?;
+    let response = request
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
     let (status, bytes) = read_response_limited(response).await?;
     if !status.is_success() {
         let message = String::from_utf8_lossy(&bytes);
         let short = message.chars().take(800).collect::<String>();
-        return Err(format!("server returned HTTP {}: {}", status.as_u16(), short));
+        return Err(format!(
+            "server returned HTTP {}: {}",
+            status.as_u16(),
+            short
+        ));
     }
     serde_json::from_slice(&bytes).map_err(|e| format!("invalid JSON from server: {e}"))
 }
@@ -177,7 +194,10 @@ async fn summary(session: &Session) -> Result<ServerSummary, String> {
 }
 
 #[tauri::command]
-async fn connect_server(args: ConnectArgs, state: tauri::State<'_, AppState>) -> Result<ServerSummary, String> {
+async fn connect_server(
+    args: ConnectArgs,
+    state: tauri::State<'_, AppState>,
+) -> Result<ServerSummary, String> {
     let base_url = normalize_server_url(&args.server_url)?;
     let token = args.token.trim().to_string();
     if token.len() < 32 || token.len() > MAX_TOKEN_BYTES || token.chars().any(char::is_whitespace) {
@@ -316,12 +336,10 @@ pub fn run() {
                 .app_local_data_dir()
                 .map_err(|e| format!("could not resolve app data directory: {e}"))?
                 .join("stronghold-salt");
-            app.handle().plugin(
-                tauri_plugin_stronghold::Builder::with_argon2(&salt_path).build(),
-            )?;
-            #[cfg(any(target_os = "android", target_os = "ios"))]
             app.handle()
-                .plugin(tauri_plugin_biometric::Builder::new().build())?;
+                .plugin(tauri_plugin_stronghold::Builder::with_argon2(&salt_path).build())?;
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            app.handle().plugin(tauri_plugin_biometric::init())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
