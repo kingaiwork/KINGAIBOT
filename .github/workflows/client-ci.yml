@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/v1.3-cross-platform-clients
+      - agent/v1.3-integration
     paths:
       - 'clients/control-center/**'
       - '.github/workflows/client-ci.yml'
