@@ -27,6 +27,23 @@ struct ConnectArgs {
     token: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PairDeviceArgs {
+    server_url: String,
+    pairing_id: String,
+    pairing_secret: String,
+    device_name: String,
+    platform: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreatePairingArgs {
+    scopes: Vec<String>,
+    expires_in_seconds: u64,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ServerSummary {
@@ -34,6 +51,14 @@ struct ServerSummary {
     version: String,
     base_url: String,
     ready: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PairDeviceResult {
+    summary: ServerSummary,
+    device_token: String,
+    device: Value,
 }
 
 fn normalize_server_url(raw: &str) -> Result<Url, String> {
@@ -108,6 +133,23 @@ fn validate_id(id: &str) -> Result<(), String> {
     } else {
         Err("invalid resource identifier".into())
     }
+}
+
+fn validate_token(token: &str) -> Result<(), String> {
+    if token.len() < 32 || token.len() > MAX_TOKEN_BYTES || token.chars().any(char::is_whitespace) {
+        return Err("access token must be 32-4096 non-whitespace characters".into());
+    }
+    Ok(())
+}
+
+fn secure_client() -> Result<Client, String> {
+    Client::builder()
+        .redirect(Policy::none())
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .user_agent("KINGAIBOT-Control-Center/0.2")
+        .build()
+        .map_err(|e| format!("failed to initialize secure HTTP client: {e}"))
 }
 
 async fn read_response_limited(
@@ -193,32 +235,17 @@ async fn summary(session: &Session) -> Result<ServerSummary, String> {
     })
 }
 
-#[tauri::command]
-async fn connect_server(
-    args: ConnectArgs,
-    state: tauri::State<'_, AppState>,
+async fn authenticate_session(
+    base_url: Url,
+    token: String,
+    state: &tauri::State<'_, AppState>,
 ) -> Result<ServerSummary, String> {
-    let base_url = normalize_server_url(&args.server_url)?;
-    let token = args.token.trim().to_string();
-    if token.len() < 32 || token.len() > MAX_TOKEN_BYTES || token.chars().any(char::is_whitespace) {
-        return Err("admin token must be 32-4096 non-whitespace characters".into());
-    }
-
-    let client = Client::builder()
-        .redirect(Policy::none())
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
-        .user_agent("KINGAIBOT-Control-Center/0.1")
-        .build()
-        .map_err(|e| format!("failed to initialize secure HTTP client: {e}"))?;
+    validate_token(&token)?;
     let session = Session {
         base_url,
         token,
-        client,
+        client: secure_client()?,
     };
-
-    // Authenticate before retaining the session. The list endpoint is read-only
-    // and protected by the server's admin credential.
     api_json(&session, Method::GET, &["v1", "tasks"], None).await?;
     let info = summary(&session).await?;
     *state
@@ -226,6 +253,73 @@ async fn connect_server(
         .lock()
         .map_err(|_| "client session lock is poisoned".to_string())? = Some(session);
     Ok(info)
+}
+
+#[tauri::command]
+async fn connect_server(
+    args: ConnectArgs,
+    state: tauri::State<'_, AppState>,
+) -> Result<ServerSummary, String> {
+    let base_url = normalize_server_url(&args.server_url)?;
+    authenticate_session(base_url, args.token.trim().to_string(), &state).await
+}
+
+#[tauri::command]
+async fn pair_device(
+    args: PairDeviceArgs,
+    state: tauri::State<'_, AppState>,
+) -> Result<PairDeviceResult, String> {
+    let base_url = normalize_server_url(&args.server_url)?;
+    validate_id(args.pairing_id.trim())?;
+    let pairing_secret = args.pairing_secret.trim();
+    if pairing_secret.len() < 32 || pairing_secret.len() > 256 || pairing_secret.chars().any(char::is_whitespace) {
+        return Err("invalid pairing secret".into());
+    }
+    let device_name = args.device_name.trim();
+    if device_name.is_empty() || device_name.len() > 80 {
+        return Err("device name must contain 1-80 characters".into());
+    }
+    let platform = args
+        .platform
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(std::env::consts::OS);
+    if platform.len() > 80 {
+        return Err("platform label is too long".into());
+    }
+
+    let client = secure_client()?;
+    let response = client
+        .post(endpoint(&base_url, &["v1", "device-pair"])? )
+        .header("Accept", "application/json")
+        .json(&json!({
+            "pairing_id": args.pairing_id.trim(),
+            "pairing_secret": pairing_secret,
+            "device_name": device_name,
+            "platform": platform
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("pairing request failed: {e}"))?;
+    let (status, bytes) = read_response_limited(response).await?;
+    if !status.is_success() {
+        return Err(format!("pairing rejected with HTTP {}", status.as_u16()));
+    }
+    let body: Value = serde_json::from_slice(&bytes).map_err(|e| format!("invalid pairing response: {e}"))?;
+    let device_token = body
+        .get("device_token")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "pairing response did not contain a device token".to_string())?
+        .to_string();
+    validate_token(&device_token)?;
+    let device = body.get("device").cloned().unwrap_or(Value::Null);
+    let summary = authenticate_session(base_url, device_token.clone(), &state).await?;
+    Ok(PairDeviceResult {
+        summary,
+        device_token,
+        device,
+    })
 }
 
 #[tauri::command]
@@ -324,6 +418,47 @@ async fn list_evolution(state: tauri::State<'_, AppState>) -> Result<Value, Stri
     .await
 }
 
+#[tauri::command]
+async fn create_device_pairing(
+    args: CreatePairingArgs,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, String> {
+    if args.expires_in_seconds > 900 {
+        return Err("pairing lifetime cannot exceed 900 seconds".into());
+    }
+    let session = current_session(&state)?;
+    api_json(
+        &session,
+        Method::POST,
+        &["v1", "devices", "pairings"],
+        Some(json!({
+            "scopes": args.scopes,
+            "expires_in_seconds": args.expires_in_seconds
+        })),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn list_devices(state: tauri::State<'_, AppState>) -> Result<Value, String> {
+    let session = current_session(&state)?;
+    api_json(&session, Method::GET, &["v1", "devices"], None).await
+}
+
+#[tauri::command]
+async fn revoke_device(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    validate_id(&id)?;
+    let session = current_session(&state)?;
+    api_json(
+        &session,
+        Method::POST,
+        &["v1", "devices", &id, "revoke"],
+        Some(json!({})),
+    )
+    .await?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -344,6 +479,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             connect_server,
+            pair_device,
             disconnect_server,
             server_status,
             list_tasks,
@@ -351,7 +487,10 @@ pub fn run() {
             cancel_task,
             list_approvals,
             decide_approval,
-            list_evolution
+            list_evolution,
+            create_device_pairing,
+            list_devices,
+            revoke_device
         ])
         .run(tauri::generate_context!())
         .expect("error while running KINGAIBOT Control Center");
