@@ -35,14 +35,18 @@ jobs:
           npx tauri icon /tmp/kingaibot-icon.png
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p = Path('src-tauri/src/lib.rs')
           s = p.read_text()
-          old = '''app.handle()
-                .plugin(tauri_plugin_biometric::Builder::new().build())?;'''
-          new = '''app.handle().plugin(tauri_plugin_biometric::init())?;'''
-          if old not in s:
-              raise SystemExit('biometric integration patch target not found')
-          p.write_text(s.replace(old, new, 1))
+          s, n = re.subn(
+              r'app\.handle\(\)\s*\.plugin\(tauri_plugin_biometric::Builder::new\(\)\.build\(\)\)\?;',
+              'app.handle().plugin(tauri_plugin_biometric::init())?;',
+              s,
+              count=1,
+          )
+          if n != 1:
+              raise SystemExit('biometric integration patch target not found exactly once')
+          p.write_text(s)
           PY
           cargo fmt --manifest-path src-tauri/Cargo.toml --all
       - name: Validate corrected client core
