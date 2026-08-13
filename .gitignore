@@ -7,3 +7,11 @@
 kingagent
 kingagentd
 *.exe
+
+# KINGAIBOT Control Center
+/clients/control-center/node_modules/
+/clients/control-center/dist/
+/clients/control-center/src-tauri/target/
+/clients/control-center/src-tauri/gen/
+/clients/control-center/.tauri/
+*.dSYM/
