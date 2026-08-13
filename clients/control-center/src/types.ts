@@ -53,6 +53,32 @@ export interface EvolutionProposal {
   updated_at: string;
 }
 
+export interface DeviceRecord {
+  id: string;
+  name: string;
+  platform: string;
+  scopes: string[];
+  created_at: string;
+  revoked_at?: string;
+}
+
+export interface PairDeviceResult {
+  summary: ServerSummary;
+  deviceToken: string;
+  device: DeviceRecord;
+}
+
+export interface PairingResult {
+  pairing_id: string;
+  pairing_secret: string;
+  scopes: string[];
+  expires_at: string;
+}
+
+export interface DeviceListResponse {
+  devices: DeviceRecord[];
+}
+
 export interface TaskListResponse {
   tasks: Task[];
 }
