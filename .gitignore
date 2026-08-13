@@ -14,4 +14,5 @@ kingagentd
 /clients/control-center/src-tauri/target/
 /clients/control-center/src-tauri/gen/
 /clients/control-center/.tauri/
+/clients/control-center/*.tsbuildinfo
 *.dSYM/
