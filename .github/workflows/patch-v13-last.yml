@@ -1,0 +1,109 @@
+name: Patch final v1.3 safety details once
+
+on:
+  push:
+    branches: [agent/v1.3-platform]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: kingaibot-v13-final-patch
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: agent/v1.3-platform
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.6'
+      - name: Apply deterministic final fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "kingaibot-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git pull --rebase origin agent/v1.3-platform
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          gemini = Path('internal/provider/gemini.go')
+          text = gemini.read_text()
+          text = text.replace('ID   string         `json:"id,omitempty"`', 'ID   string         `json:"-"`')
+          gemini.write_text(text)
+
+          release = Path('scripts/build-release-v13.sh')
+          text = release.read_text()
+          text = text.replace('VERSION="${VERSION#v}"\n', 'VERSION="${VERSION#v}"\nVERSION="${VERSION//\\//-}"\n')
+          old = '''"$ROOT/scripts/generate-sbom.py" "$DIST/sbom.cdx.json"
+(
+  cd "$DIST"
+  sha256sum kingaibot_* sbom.cdx.json > SHA256SUMS
+)
+
+cat > "$DIST/RELEASE-MANIFEST.json" <<EOF
+{
+  "product": "KINGAIBOT",
+  "version": "$VERSION",
+  "go": "$GO_VERSION",
+  "binaries": ["kingagentd", "kingagent", "kingworker", "kingconsole"],
+  "targets": ["linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64", "windows/arm64"]
+}
+EOF
+normalize_mtime "$DIST"
+'''
+          new = '''"$ROOT/scripts/generate-sbom.py" "$DIST/sbom.cdx.json"
+cat > "$DIST/RELEASE-MANIFEST.json" <<EOF
+{
+  "product": "KINGAIBOT",
+  "version": "$VERSION",
+  "go": "$GO_VERSION",
+  "binaries": ["kingagentd", "kingagent", "kingworker", "kingconsole"],
+  "targets": ["linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64", "windows/arm64"]
+}
+EOF
+(
+  cd "$DIST"
+  sha256sum kingaibot_* sbom.cdx.json RELEASE-MANIFEST.json > SHA256SUMS
+)
+normalize_mtime "$DIST"
+'''
+          if old not in text:
+              raise SystemExit('release tail did not match expected content')
+          release.write_text(text.replace(old, new))
+
+          console = Path('deploy/docker/Dockerfile.console')
+          text = console.read_text()
+          text = text.replace(
+              'CMD ["-listen","0.0.0.0:18889","-api","http://kingagentd:18888"]',
+              'CMD ["-listen","0.0.0.0:18889"]',
+          )
+          console.write_text(text)
+
+          full = Path('.github/workflows/release-v13-full.yml')
+          if full.exists():
+              text = full.read_text().replace(
+                  'uses: actions/upload-artifact@v4',
+                  'uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2',
+              )
+              full.write_text(text)
+          PY
+
+          find cmd internal -type f -name '*.go' -print0 | xargs -0 gofmt -w
+          chmod +x scripts/build-release-v13.sh
+          rm -f .github/workflows/format-v13.yml .github/workflows/finalize-v13.yml .github/workflows/patch-v13-last.yml
+
+          git add -A
+          git commit -m "Finalize v1.3 safety and release details" || exit 0
+          for attempt in 1 2 3; do
+            if git push origin HEAD:agent/v1.3-platform; then exit 0; fi
+            git fetch origin agent/v1.3-platform
+            git rebase origin/agent/v1.3-platform
+          done
+          exit 1
