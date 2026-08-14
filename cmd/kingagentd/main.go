@@ -75,6 +75,10 @@ func main() {
 	must(mustErr)
 	tr.RegisterExtension(cc)
 
+	ec, mustErr := evolution.NewController(es, el)
+	must(mustErr)
+	tr.RegisterExtension(ec)
+
 	must(rt.Recover())
 
 	coreHandler := api.New(cfg, rt, tr).Handler()
@@ -112,13 +116,19 @@ func main() {
 	root.Handle("/v1/cluster/jobs/", clusterAdmin)
 	root.Handle("/v1/cluster/worker/", cc.WorkerHandler())
 
+	// Evolution control can create proposals, record evaluations and progress a
+	// reviewed artifact through stage/release/rollback. It never edits source or
+	// deploys itself; all trust transitions require admin authority and audit.
+	evolutionAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, ec.Handler())
+	root.Handle("/v1/evolution/control/", evolutionAdmin)
+
 	// Channel-specific inbound authentication is enforced inside InboundHandler.
 	root.Handle("/v1/inbound/", pm.InboundHandler())
 	root.Handle("/", coreHandler)
 
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "enabled", "knowledge", "enabled", "cluster", "enabled")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "enabled", "knowledge", "enabled", "cluster", "enabled", "evolution_control", "enabled")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
