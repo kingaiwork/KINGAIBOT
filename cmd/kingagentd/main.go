@@ -151,9 +151,12 @@ func main() {
 
 	// Capability Envelopes are immutable authority grants. Delegation can only
 	// narrow authority, and revoking a parent makes every descendant ineffective.
+	// Budget usage/preflight stays on the same admin-only authority surface;
+	// preflight is advisory and execution always rechecks atomically.
 	authorityAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, authorityStore.Handler())
 	root.Handle("/v1/authority/envelopes", authorityAdmin)
 	root.Handle("/v1/authority/envelopes/", authorityAdmin)
+	root.Handle("/v1/authority/usage", authorityAdmin)
 
 	// Orchestration performs the race-free handoff from a Ready/approved
 	// WorkGraph execute/delegate node to an authority-bound Cluster job. This
