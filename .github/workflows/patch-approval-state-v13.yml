@@ -1,0 +1,118 @@
+name: Patch approval state machine once
+
+on:
+  push:
+    branches: [agent/v1.3-platform]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: agent/v1.3-platform
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.6'
+      - name: Repair approval transitions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "kingaibot-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git pull --rebase origin agent/v1.3-platform
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('internal/runtime/runtime.go')
+          text = p.read_text()
+          marker = 'func (r *Runtime) DecideApproval(id, status string) error {'
+          start = text.find(marker)
+          if start < 0:
+              raise SystemExit('DecideApproval not found')
+          replacement = r'''func (r *Runtime) DecideApproval(id, status string) error {
+	if status != "approved" && status != "denied" {
+		return errors.New("status must be approved or denied")
+	}
+	a, err := r.approvals.Update(id, func(a *approval.Approval) error {
+		if a.Status != "pending" {
+			return errors.New("approval already decided")
+		}
+		a.Status = status
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if err := r.events.Append(eventlog.Event{Type: "approval." + status, TaskID: a.TaskID, Data: map[string]any{"approval_id": a.ID, "tool": a.Tool, "arguments_hash": a.ArgumentsHash}}); err != nil {
+		// A trust-changing approval decision is not considered accepted unless it
+		// is durably audited. Best-effort rollback to pending keeps the action
+		// blocked and lets an operator retry after audit health is restored.
+		_, rollbackErr := r.approvals.Update(id, func(cur *approval.Approval) error {
+			if cur.Status == status && cur.ExecutionState == "" {
+				cur.Status = "pending"
+			}
+			return nil
+		})
+		if rollbackErr != nil {
+			return fmt.Errorf("approval audit failed and approval rollback also failed; manual reconciliation required: audit=%v rollback=%w", err, rollbackErr)
+		}
+		return fmt.Errorf("approval decision rolled back because audit append failed: %w", err)
+	}
+
+	if status == "denied" {
+		_, taskErr := r.tasks.Update(a.TaskID, func(t *task.Task) error {
+			if t.Status == task.Canceled || t.Status == task.Completed || t.Status == task.Failed {
+				return nil
+			}
+			if t.Status != task.WaitingApproval || t.PendingApproval != a.ID {
+				return errors.New("task is not waiting for this approval")
+			}
+			t.Status = task.Failed
+			t.PendingApproval = ""
+			t.Error = "approval denied"
+			return nil
+		})
+		return taskErr
+	}
+
+	_, err = r.tasks.Update(a.TaskID, func(t *task.Task) error {
+		if t.Status != task.WaitingApproval || t.PendingApproval != a.ID {
+			return errors.New("task is not waiting for this approval")
+		}
+		t.Status = task.Queued
+		t.PendingApproval = ""
+		t.Error = ""
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if !r.enqueue(a.TaskID) {
+		_, _ = r.tasks.Update(a.TaskID, func(t *task.Task) error {
+			t.Status = task.Failed
+			t.Error = "runtime queue unavailable after approval"
+			return nil
+		})
+		return ErrQueueUnavailable
+	}
+	return nil
+}
+'''
+          p.write_text(text[:start] + replacement)
+          PY
+          gofmt -w internal/runtime/runtime.go
+          go test ./internal/runtime ./internal/approval ./internal/api
+          rm -f .github/workflows/patch-approval-state-v13.yml
+          git add -A
+          git commit -m "Repair approval lifecycle and denial handling" || exit 0
+          for attempt in 1 2 3; do
+            if git push origin HEAD:agent/v1.3-platform; then exit 0; fi
+            git fetch origin agent/v1.3-platform
+            git rebase origin/agent/v1.3-platform
+          done
+          exit 1
