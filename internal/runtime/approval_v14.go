@@ -146,7 +146,8 @@ func (r *Runtime) applyApprovalDecisionV14(a *approval.Approval, decision string
 		return nil
 	}
 
-	updated, err := r.tasks.Update(a.TaskID, func(t *task.Task) error {
+	shouldEnqueue := false
+	_, err := r.tasks.Update(a.TaskID, func(t *task.Task) error {
 		switch t.Status {
 		case task.WaitingApproval:
 			if t.PendingApproval != a.ID {
@@ -155,10 +156,11 @@ func (r *Runtime) applyApprovalDecisionV14(a *approval.Approval, decision string
 			t.Status = task.Queued
 			t.PendingApproval = ""
 			t.Error = ""
+			shouldEnqueue = true
 			return nil
 		case task.Queued, task.Running, task.Completing, task.Completed, task.Failed, task.Canceled, task.Reconciliation:
 			// Idempotent recovery after the final approval was persisted. Do not
-			// move already-progressed work backward.
+			// move already-progressed work backward or enqueue an already-queued Task twice.
 			return nil
 		default:
 			return fmt.Errorf("task has incompatible approval state %s", t.Status)
@@ -167,7 +169,7 @@ func (r *Runtime) applyApprovalDecisionV14(a *approval.Approval, decision string
 	if err != nil {
 		return err
 	}
-	if updated.Status != task.Queued {
+	if !shouldEnqueue {
 		return nil
 	}
 	if !r.enqueue(a.TaskID) {
