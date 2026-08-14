@@ -8,7 +8,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/task"
 )
 
-func TestRecoverIgnoresPendingAuditTask(t *testing.T) {
+func TestRecoverMovesPendingAuditTaskToReconciliationWithoutExecution(t *testing.T) {
 	r := bareRuntimeForCreateTest(t, 4)
 	pending := &task.Task{ID: "task_pending_test", Input: "must not run", Status: task.PendingAudit}
 	if err := r.tasks.Save(pending); err != nil {
@@ -24,8 +24,11 @@ func TestRecoverIgnoresPendingAuditTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Status != task.PendingAudit {
-		t.Fatalf("pending-audit task changed status during recovery: %s", stored.Status)
+	if stored.Status != task.Reconciliation {
+		t.Fatalf("pending-audit task status=%s, want reconciliation", stored.Status)
+	}
+	if !strings.Contains(stored.Error, "creation state is ambiguous") {
+		t.Fatalf("pending-audit reconciliation reason missing: %q", stored.Error)
 	}
 }
 
