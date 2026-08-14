@@ -30,12 +30,12 @@ type jobSummary struct {
 func (c *Coordinator) ToolDefinitions() []provider.ToolDef {
 	return []provider.ToolDef{
 		{Type: "function", Function: provider.FunctionDef{Name: "cluster_workers_list", Description: "List registered remote workers and their declared capabilities. Worker secrets and metadata are never returned to the model.", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}}},
-		{Type: "function", Function: provider.FunctionDef{Name: "cluster_job_submit", Description: "Request a durable remote-worker job. In authority-enforced deployments, direct model submission is denied unless trusted runtime context binds an authority envelope; the model cannot choose or elevate its own authority.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"kind": map[string]any{"type": "string"}, "payload": map[string]any{}, "required_capabilities": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "priority": map[string]any{"type": "integer"}, "replay_policy": map[string]any{"type": "string", "enum": []string{"manual", "safe"}}}, "required": []string{"kind"}}}},
+		{Type: "function", Function: provider.FunctionDef{Name: "cluster_job_submit", Description: "Request a durable remote-worker job using authority already bound to the current trusted task. The model cannot choose an authority identifier. Declare the capability, data scope or tool required by the requested work so the authority envelope can be checked.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"kind": map[string]any{"type": "string"}, "payload": map[string]any{}, "required_capabilities": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "required_data_scopes": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "required_tool": map[string]any{"type": "string"}, "priority": map[string]any{"type": "integer"}, "replay_policy": map[string]any{"type": "string", "enum": []string{"manual", "safe"}}}, "required": []string{"kind"}}}},
 		{Type: "function", Function: provider.FunctionDef{Name: "cluster_jobs_list", Description: "List remote job lifecycle summaries without exposing raw payloads, lease tokens, result data or authority identifiers", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}}},
 	}
 }
 
-func (c *Coordinator) ExecuteTool(_ context.Context, _ string, name string, raw json.RawMessage) (string, error) {
+func (c *Coordinator) ExecuteTool(_ context.Context, taskID, name string, raw json.RawMessage) (string, error) {
 	var v any
 	var err error
 	switch name {
@@ -64,13 +64,19 @@ func (c *Coordinator) ExecuteTool(_ context.Context, _ string, name string, raw 
 			Kind                 string          `json:"kind"`
 			Payload              json.RawMessage `json:"payload"`
 			RequiredCapabilities []string        `json:"required_capabilities"`
+			RequiredDataScopes   []string        `json:"required_data_scopes"`
+			RequiredTool         string          `json:"required_tool"`
 			Priority             int             `json:"priority"`
 			ReplayPolicy         string          `json:"replay_policy"`
 		}
 		if er := json.Unmarshal(raw, &in); er != nil {
 			return "", er
 		}
-		v, err = c.SubmitAuthorized(Job{Kind: in.Kind, Payload: in.Payload, RequiredCapabilities: in.RequiredCapabilities, Priority: in.Priority, ReplayPolicy: in.ReplayPolicy}, "", nil, "")
+		authorityID, er := c.authorityForTask(taskID)
+		if er != nil {
+			return "", er
+		}
+		v, err = c.SubmitAuthorized(Job{Kind: in.Kind, Payload: in.Payload, RequiredCapabilities: in.RequiredCapabilities, Priority: in.Priority, ReplayPolicy: in.ReplayPolicy}, authorityID, in.RequiredDataScopes, in.RequiredTool)
 	default:
 		return "", errors.New("unknown cluster tool")
 	}
