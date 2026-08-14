@@ -19,6 +19,7 @@ const (
 	Queued          Status = "queued"
 	Running         Status = "running"
 	WaitingApproval Status = "waiting_approval"
+	Reconciliation  Status = "reconciliation"
 	Completed       Status = "completed"
 	Failed          Status = "failed"
 	Canceled        Status = "canceled"
