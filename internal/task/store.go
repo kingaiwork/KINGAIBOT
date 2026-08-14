@@ -179,7 +179,7 @@ func (s *Store) Recoverable() ([]*Task, error) {
 	}
 	out := []*Task{}
 	for _, t := range all {
-		if t.Status == Running || t.Status == Completing || t.Status == Queued {
+		if t.Status == PendingAudit || t.Status == Running || t.Status == Completing || t.Status == Queued {
 			out = append(out, t)
 		}
 	}
