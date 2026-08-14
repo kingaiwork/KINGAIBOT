@@ -21,15 +21,18 @@ func (m *Manager) SendSessionV14(id, text string) (*task.Task, error) {
 // and delegates the remaining control-plane API to the compatibility handler.
 // Exact method/path patterns win over the fallback root handler.
 func (m *Manager) HandlerV14() http.Handler {
-	// New v1.4 workflow runs and partially-dispatched missions use distinct
-	// durable states, so compatibility recovery ignores them. Recover them here
-	// before serving requests.
+	// New v1.4 workflow runs and missions use distinct durable states, so
+	// compatibility recovery/synchronization ignores them. Recover and start the
+	// dedicated v1.4 mission synchronizer before serving requests.
 	m.RecoverWorkflowRunsV14()
 	m.RecoverMissionsV14()
+	m.startMissionSyncV14()
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/platform/sessions/{id}/messages", m.httpSessionMessageV14)
 	mux.HandleFunc("POST /v1/platform/workflows/{id}/run", m.httpWorkflowRunV14)
+	mux.HandleFunc("GET /v1/platform/missions", m.httpMissionsV14)
 	mux.HandleFunc("POST /v1/platform/missions", m.httpMissionDispatchV14)
+	mux.HandleFunc("GET /v1/platform/missions/{id}", m.httpMissionV14)
 	mux.Handle("/", m.Handler())
 	return mux
 }
@@ -56,6 +59,16 @@ func (m *Manager) httpWorkflowRunV14(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writePlatformJSON(w, http.StatusAccepted, run)
+}
+
+func (m *Manager) httpMissionsV14(w http.ResponseWriter, _ *http.Request) {
+	missions, err := m.MissionsV14()
+	respondPlatform(w, missions, err)
+}
+
+func (m *Manager) httpMissionV14(w http.ResponseWriter, r *http.Request) {
+	mission, err := m.MissionV14(r.PathValue("id"))
+	respondPlatform(w, mission, err)
 }
 
 func (m *Manager) httpMissionDispatchV14(w http.ResponseWriter, r *http.Request) {
