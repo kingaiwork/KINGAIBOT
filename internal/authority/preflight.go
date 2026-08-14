@@ -1,7 +1,6 @@
 package authority
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -127,9 +126,6 @@ func (s *Store) UsageOverview() ([]*UsageSnapshot, error) {
 		}
 		usage, err := s.Usage(grant.Envelope.ID)
 		if err != nil {
-			if errors.Is(err, errUsageUnavailable) {
-				continue
-			}
 			return nil, err
 		}
 		out = append(out, usage)
@@ -137,5 +133,3 @@ func (s *Store) UsageOverview() ([]*UsageSnapshot, error) {
 	sort.Slice(out, func(i, j int) bool { return out[i].AuthorityID < out[j].AuthorityID })
 	return out, nil
 }
-
-var errUsageUnavailable = errors.New("authority usage unavailable")
