@@ -36,13 +36,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker run -d --rm --name kingconsole-smoke -p 18889:18889 kingaibot-console:smoke
-          trap 'docker rm -f kingconsole-smoke >/dev/null 2>&1 || true' EXIT
+          docker rm -f kingconsole-smoke >/dev/null 2>&1 || true
+          docker run -d --name kingconsole-smoke -p 18889:18889 kingaibot-console:smoke
+          cleanup() { docker rm -f kingconsole-smoke >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
           for attempt in 1 2 3 4 5; do
             if curl -fsS http://127.0.0.1:18889/ui/ | grep -q 'KINGAIBOT Control Center'; then
               exit 0
             fi
+            if ! docker inspect -f '{{.State.Running}}' kingconsole-smoke 2>/dev/null | grep -qx true; then
+              echo "kingconsole exited before becoming ready" >&2
+              docker inspect kingconsole-smoke || true
+              docker logs kingconsole-smoke || true
+              exit 1
+            fi
             sleep 1
           done
+          echo "kingconsole stayed running but did not become ready" >&2
+          docker inspect kingconsole-smoke || true
           docker logs kingconsole-smoke || true
           exit 1
