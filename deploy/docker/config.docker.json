@@ -60,7 +60,9 @@
       "knowledge_propose": "ask",
       "cluster_workers_list": "allow",
       "cluster_jobs_list": "allow",
-      "cluster_job_submit": "ask"
+      "cluster_job_submit": "ask",
+      "evolution_proposals_list": "allow",
+      "evolution_propose_improvement": "ask"
     },
     "shell_allowlist": [],
     "http_allowed_hosts": [
