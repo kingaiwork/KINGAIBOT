@@ -1,0 +1,111 @@
+name: Consolidate v1.3 patches v2 once
+
+on:
+  push:
+    branches: [agent/v1.3-platform]
+
+permissions:
+  contents: write
+
+jobs:
+  consolidate:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: kingaibot-v13-consolidate-v2
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: agent/v1.3-platform
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.6'
+      - name: Assert intended state, test, and remove every temporary writer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "kingaibot-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git pull --rebase origin agent/v1.3-platform
+          python3 - <<'PY'
+          from pathlib import Path
+
+          checks = {
+              'internal/runtime/runtime.go': [
+                  'ErrInvalidTaskInput',
+                  'ErrQueueUnavailable',
+                  'approval decision rolled back because audit append failed',
+                  'approval denied',
+              ],
+              'internal/api/server.go': [
+                  'karuntime.ErrInvalidTaskInput',
+                  'karuntime.ErrQueueUnavailable',
+                  'runtime_busy',
+              ],
+              'cmd/kingagentd/main.go': ['platform.HTTPGuard(root)'],
+              'internal/platform/http_guard.go': [
+                  'rootRateLimit',
+                  'len(l.entries) > 8192',
+                  'X-Content-Type-Options',
+              ],
+              'deploy/docker/Dockerfile.worker': ['--chown=65532:65532', '/out/data /data'],
+              'internal/provider/gemini.go': ['`json:"-"`'],
+              'scripts/build-release-v13.sh': [
+                  'VERSION="${VERSION//\\//-}"',
+                  'RELEASE-MANIFEST.json > SHA256SUMS',
+                  'kingworker kingconsole',
+              ],
+              '.github/workflows/release-v13-full.yml': [
+                  'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+              ],
+          }
+          for filename, needles in checks.items():
+              p = Path(filename)
+              if not p.exists():
+                  raise SystemExit(f'missing required file: {filename}')
+              text = p.read_text()
+              for needle in needles:
+                  if needle not in text:
+                      raise SystemExit(f'{filename} is missing required final state: {needle}')
+
+          release = Path('.github/workflows/release-v13-full.yml').read_text()
+          if 'artifact-metadata:' in release:
+              raise SystemExit('release workflow still has unnecessary artifact-metadata permission')
+
+          # Check only workflows intended to survive the final cleanup. Temporary
+          # patch workflows contain old strings in their migration code by design.
+          persistent = []
+          for p in Path('.github/workflows').glob('*.yml'):
+              if p.name.startswith(('patch-', 'fix-')):
+                  continue
+              if p.name in {'format-v13.yml', 'finalize-v13.yml', 'final-gofmt-v13.yml', 'certify-v13-once.yml'}:
+                  continue
+              persistent.append(p.read_text())
+          stale_pin = '@' + 'v1.6.0'
+          if stale_pin in ''.join(persistent):
+              raise SystemExit('stale govulncheck scanner pin remains in persistent workflow')
+          PY
+
+          find cmd internal -type f -name '*.go' -print0 | xargs -0 gofmt -w
+          go vet ./...
+          go test -count=1 ./...
+
+          find .github/workflows -maxdepth 1 -type f \( \
+            -name 'patch-*.yml' -o \
+            -name 'fix-*.yml' -o \
+            -name 'format-v13.yml' -o \
+            -name 'finalize-v13.yml' -o \
+            -name 'final-gofmt-v13.yml' -o \
+            -name 'certify-v13-once.yml' \
+          \) -delete
+
+          git add -A
+          git commit -m "Consolidate stable v1.3 source state" || exit 0
+          for attempt in 1 2 3; do
+            if git push origin HEAD:agent/v1.3-platform; then exit 0; fi
+            git fetch origin agent/v1.3-platform
+            git rebase origin/agent/v1.3-platform
+          done
+          exit 1
