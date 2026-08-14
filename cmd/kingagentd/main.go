@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -10,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -71,7 +69,22 @@ func main() {
 
 	coreHandler := api.New(cfg, rt, tr).Handler()
 	root := http.NewServeMux()
-	root.Handle("/v1/platform/", bearerEnv(cfg.Server.AdminTokenEnv, pm.Handler()))
+
+	// Scoped platform API: legacy admin secret remains accepted, while durable
+	// access keys can be granted read/write roles without receiving core admin.
+	platformScoped := pm.ScopedAuthHandler(cfg.Server.AdminTokenEnv, pm.Handler())
+	identityAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, pm.IdentityHandler())
+	statusScoped := pm.ScopedAuthHandler(cfg.Server.AdminTokenEnv, pm.StatusHandler())
+	root.Handle("/v1/platform/identities", identityAdmin)
+	root.Handle("/v1/platform/identities/", identityAdmin)
+	root.Handle("/v1/platform/access-keys", identityAdmin)
+	root.Handle("/v1/platform/access-keys/", identityAdmin)
+	root.Handle("/v1/platform/status", statusScoped)
+	root.Handle("/v1/platform/metrics", statusScoped)
+	root.Handle("/v1/platform/", platformScoped)
+
+	// Channel-specific inbound authentication is enforced inside InboundHandler.
+	root.Handle("/v1/inbound/", pm.InboundHandler())
 	root.Handle("/", coreHandler)
 
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
@@ -89,27 +102,6 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
-}
-
-func bearerEnv(envName string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expected := os.Getenv(envName)
-		if len(expected) < 32 {
-			http.Error(w, "server authentication is not configured", http.StatusInternalServerError)
-			return
-		}
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") {
-			http.Error(w, "bearer token required", http.StatusUnauthorized)
-			return
-		}
-		got := strings.TrimPrefix(auth, "Bearer ")
-		if len(got) != len(expected) || subtle.ConstantTimeCompare([]byte(got), []byte(expected)) != 1 {
-			http.Error(w, "valid bearer token required", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func must(err error) {
