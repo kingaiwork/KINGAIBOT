@@ -16,6 +16,7 @@ func (c *Coordinator) AdminHandler() http.Handler {
 	mux.HandleFunc("POST /v1/cluster/workers/{id}/enabled", c.httpWorkerEnabled)
 	mux.HandleFunc("GET /v1/cluster/jobs", c.httpJobs)
 	mux.HandleFunc("POST /v1/cluster/jobs", c.httpJobs)
+	mux.HandleFunc("POST /v1/cluster/jobs/{id}/reconcile", c.httpReconcile)
 	return mux
 }
 
@@ -85,6 +86,19 @@ func (c *Coordinator) httpJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	v, err := c.Submit(in)
 	clusterWrite(w, v, err, http.StatusCreated)
+}
+
+func (c *Coordinator) httpReconcile(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Action string          `json:"action"`
+		Note   string          `json:"note,omitempty"`
+		Result json.RawMessage `json:"result,omitempty"`
+	}
+	if !clusterDecode(w, r, &in) {
+		return
+	}
+	v, err := c.Reconcile(r.PathValue("id"), in.Action, in.Note, in.Result)
+	clusterWrite(w, v, err, http.StatusOK)
 }
 
 func (c *Coordinator) workerFromRequest(r *http.Request) (*Worker, error) {
@@ -170,7 +184,7 @@ func (c *Coordinator) httpComplete(w http.ResponseWriter, r *http.Request) {
 }
 
 func clusterDecode(w http.ResponseWriter, r *http.Request, dst any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxPayloadBytes+64<<10)
+	r.Body = http.MaxBytesReader(w, r.Body, maxResultBytes+(128<<10))
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
