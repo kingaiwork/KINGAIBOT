@@ -86,6 +86,7 @@ func main() {
 
 	authorityStore, mustErr := authority.NewStore(filepath.Join(cfg.Runtime.DataDir, "authority"), el)
 	must(mustErr)
+	must(cc.SetAuthorityChecker(authorityStore))
 
 	must(rt.Recover())
 
