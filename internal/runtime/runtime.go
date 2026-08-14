@@ -19,6 +19,11 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/tool"
 )
 
+var (
+	ErrInvalidTaskInput = errors.New("invalid task input")
+	ErrQueueUnavailable = errors.New("runtime queue unavailable")
+)
+
 type Runtime struct {
 	tasks      *task.Store
 	approvals  *approval.Store
@@ -71,6 +76,7 @@ func (r *Runtime) Recover() error {
 	}
 	return nil
 }
+
 func (r *Runtime) Close() {
 	r.cancel()
 	r.mu.Lock()
@@ -83,10 +89,10 @@ func (r *Runtime) Close() {
 
 func (r *Runtime) Create(input string, meta map[string]any) (*task.Task, error) {
 	if input == "" {
-		return nil, errors.New("input required")
+		return nil, fmt.Errorf("%w: input required", ErrInvalidTaskInput)
 	}
 	if len(input) > int(r.cfg.Runtime.MaxRequestBytes) {
-		return nil, errors.New("input exceeds configured limit")
+		return nil, fmt.Errorf("%w: input exceeds configured limit", ErrInvalidTaskInput)
 	}
 	id, err := storage.RandomID("task")
 	if err != nil {
@@ -105,11 +111,17 @@ func (r *Runtime) Create(input string, meta map[string]any) (*task.Task, error) 
 		return nil, err
 	}
 	if !r.enqueue(t.ID) {
-		_, _ = r.tasks.Update(t.ID, func(x *task.Task) error { x.Status = task.Failed; x.Error = "runtime queue unavailable"; return nil })
-		return nil, errors.New("runtime queue unavailable")
+		_, _ = r.tasks.Update(t.ID, func(x *task.Task) error {
+			x.Status = task.Failed
+			x.Error = "runtime queue unavailable"
+			return nil
+		})
+		_ = r.events.Append(eventlog.Event{Type: "task.rejected", TaskID: t.ID, Data: map[string]any{"reason": "queue_unavailable"}})
+		return nil, ErrQueueUnavailable
 	}
 	return t, nil
 }
+
 func (r *Runtime) enqueue(id string) bool {
 	select {
 	case r.queue <- id:
@@ -120,6 +132,7 @@ func (r *Runtime) enqueue(id string) bool {
 		return false
 	}
 }
+
 func (r *Runtime) enqueueBlocking(id string) bool {
 	select {
 	case r.queue <- id:
@@ -128,6 +141,7 @@ func (r *Runtime) enqueueBlocking(id string) bool {
 		return false
 	}
 }
+
 func (r *Runtime) claim(id string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -137,12 +151,14 @@ func (r *Runtime) claim(id string) bool {
 	r.processing[id] = true
 	return true
 }
+
 func (r *Runtime) release(id string) {
 	r.mu.Lock()
 	delete(r.processing, id)
 	delete(r.running, id)
 	r.mu.Unlock()
 }
+
 func (r *Runtime) integrityLoop() {
 	defer r.wg.Done()
 	interval := time.Duration(r.cfg.Runtime.AuditVerifyIntervalSeconds) * time.Second
@@ -157,12 +173,14 @@ func (r *Runtime) integrityLoop() {
 		}
 	}
 }
+
 func (r *Runtime) Healthy() error {
 	if r == nil || r.events == nil {
 		return errors.New("runtime audit subsystem is not initialized")
 	}
 	return r.events.Healthy()
 }
+
 func (r *Runtime) worker() {
 	defer r.wg.Done()
 	for {
@@ -261,54 +279,54 @@ func (r *Runtime) process(id string) {
 		}
 		x.Status = task.Completed
 		x.Output = out
+		x.Provider = providerName
 		x.Error = ""
 		return nil
 	})
 	if err != nil {
 		return
 	}
-	if auditErr := r.events.Append(eventlog.Event{Type: "task.completed", TaskID: id, Data: map[string]any{"provider": providerName}}); auditErr != nil {
-		_, _ = r.tasks.Update(id, func(x *task.Task) error {
-			x.Status = task.Failed
-			x.Error = "task result produced, but audit log persistence failed; operator reconciliation required"
-			return nil
-		})
-		return
+	if r.cfg.Memory.Enabled && r.memory != nil && r.cfg.Memory.StoreTaskOutputs {
+		_ = r.memory.Add(memory.Record{Kind: "episodic", Content: out, Source: "task:" + id, Importance: 0.5, Confidence: 0.8})
 	}
-	if r.cfg.Memory.Enabled && r.memory != nil {
-		if r.cfg.Memory.StoreTaskInputs {
-			_ = r.memory.Add(memory.Record{ID: id + "_input", Kind: "episodic", Content: t.Input, Source: id, Importance: .45, Confidence: 1})
-		}
-		if r.cfg.Memory.StoreTaskOutputs && out != "" {
-			_ = r.memory.Add(memory.Record{ID: id + "_output", Kind: "episodic", Content: out, Source: id, Importance: .55, Confidence: .8})
-		}
-	}
+	_ = r.events.Append(eventlog.Event{Type: "task.completed", TaskID: id, Data: map[string]any{"provider": providerName}})
 }
+
 func (r *Runtime) Task(id string) (*task.Task, error) { return r.tasks.Get(id) }
-func (r *Runtime) Tasks() ([]*task.Task, error)       { return r.tasks.List() }
+func (r *Runtime) Tasks() ([]*task.Task, error)        { return r.tasks.List() }
+func (r *Runtime) Approvals() ([]*approval.Approval, error) {
+	return r.approvals.List()
+}
+func (r *Runtime) Evolutions() ([]*evolution.Proposal, error) { return r.evolution.List() }
+
 func (r *Runtime) Cancel(id string) error {
-	if err := r.tasks.Cancel(id); err != nil {
+	_, err := r.tasks.Update(id, func(t *task.Task) error {
+		switch t.Status {
+		case task.Completed, task.Failed, task.Canceled:
+			return errors.New("task already terminal")
+		}
+		t.Status = task.Canceled
+		t.PendingApproval = ""
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	r.mu.Lock()
-	cancel := r.running[id]
-	r.mu.Unlock()
-	if cancel != nil {
+	if cancel, ok := r.running[id]; ok {
 		cancel()
 	}
-	if err := r.events.Append(eventlog.Event{Type: "task.cancel.requested", TaskID: id}); err != nil {
-		return fmt.Errorf("task canceled, but audit append failed: %w", err)
-	}
+	r.mu.Unlock()
 	return nil
 }
-func (r *Runtime) Approvals() ([]*approval.Approval, error) { return r.approvals.List() }
+
 func (r *Runtime) DecideApproval(id, status string) error {
+	if status != "approved" && status != "denied" {
+		return errors.New("status must be approved or denied")
+	}
 	a, err := r.approvals.Update(id, func(a *approval.Approval) error {
 		if a.Status != "pending" {
 			return errors.New("approval already decided")
-		}
-		if status != "approved" && status != "denied" {
-			return errors.New("status must be approved or denied")
 		}
 		a.Status = status
 		return nil
@@ -316,55 +334,30 @@ func (r *Runtime) DecideApproval(id, status string) error {
 	if err != nil {
 		return err
 	}
-	if auditErr := r.events.Append(eventlog.Event{Type: "approval." + status, TaskID: a.TaskID, Data: map[string]any{"approval_id": id, "tool": a.Tool, "arguments_hash": a.ArgumentsHash}}); auditErr != nil {
-		_, _ = r.approvals.Update(id, func(x *approval.Approval) error {
-			if x.ExecutionState == "" {
-				x.Status = "pending"
+	if err := r.events.Append(eventlog.Event{Type: "approval." + status, TaskID: a.TaskID, Data: map[string]any{"approval_id": a.ID, "tool": a.Tool, "arguments_hash": a.ArgumentsHash}}); err != nil {
+		return fmt.Errorf("approval state persisted but audit append failed; execution remains blocked: %w", err)
+	}
+	if status == "approved" {
+		_, err = r.tasks.Update(a.TaskID, func(t *task.Task) error {
+			if t.Status != task.WaitingApproval || t.PendingApproval != a.ID {
+				return errors.New("task is not waiting for this approval")
 			}
+			t.Status = task.Queued
+			t.PendingApproval = ""
+			t.Error = ""
 			return nil
 		})
-		return fmt.Errorf("approval decision not activated because audit append failed: %w", auditErr)
-	}
-	t, err := r.tasks.Get(a.TaskID)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if t.Status != task.WaitingApproval {
-		return errors.New("task is not waiting for approval")
-	}
-	if t.PendingApproval != id {
-		return errors.New("approval does not match task pending approval")
-	}
-	if status == "denied" {
-		_, err = r.tasks.Update(t.ID, func(x *task.Task) error {
-			x.Status = task.Failed
-			x.Error = "approval denied"
-			x.PendingApproval = ""
-			return nil
-		})
-		return err
-	}
-	_, err = r.tasks.Update(t.ID, func(x *task.Task) error { x.Status = task.Queued; x.Error = ""; x.PendingApproval = ""; return nil })
-	if err != nil {
-		return err
-	}
-	if !r.enqueueBlocking(t.ID) {
-		_, _ = r.tasks.Update(t.ID, func(x *task.Task) error {
-			x.Status = task.WaitingApproval
-			x.PendingApproval = id
-			x.Error = "approval granted; runtime stopped before resume"
-			return nil
-		})
-		return errors.New("runtime stopped before approved task could resume")
+		if err != nil {
+			return err
+		}
+		if !r.enqueue(a.TaskID) {
+			_, _ = r.tasks.Update(a.TaskID, func(t *task.Task) error {
+				t.Status = task.Failed
+				t.Error = "runtime queue unavailable after approval"
+				return nil
+			})
+			return ErrQueueUnavailable
+		}
 	}
 	return nil
-}
-func (r *Runtime) Evolutions() ([]*evolution.Proposal, error) {
-	if r.evolution == nil {
-		return []*evolution.Proposal{}, nil
-	}
-	return r.evolution.List()
 }
