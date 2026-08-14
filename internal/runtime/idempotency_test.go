@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kingaiwork/KINGAIBOT/internal/task"
@@ -25,6 +26,59 @@ func TestRecoverIgnoresPendingAuditTask(t *testing.T) {
 	}
 	if stored.Status != task.PendingAudit {
 		t.Fatalf("pending-audit task changed status during recovery: %s", stored.Status)
+	}
+}
+
+func TestRecoverMovesInterruptedRunningTaskToReconciliationWithoutReplay(t *testing.T) {
+	r := bareRuntimeForCreateTest(t, 4)
+	interrupted := &task.Task{ID: "task_running_restart", Input: "external side effect may have happened", Status: task.Running, Attempts: 1}
+	if err := r.tasks.Save(interrupted); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(r.queue); got != 0 {
+		t.Fatalf("interrupted running task was blindly replayed: queue=%d", got)
+	}
+	stored, err := r.Task(interrupted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != task.Reconciliation {
+		t.Fatalf("interrupted running task status=%s, want reconciliation", stored.Status)
+	}
+	if !strings.Contains(stored.Error, "external side effects may be ambiguous") {
+		t.Fatalf("reconciliation reason missing ambiguity evidence: %q", stored.Error)
+	}
+}
+
+func TestRecoverRequeuesQueuedTask(t *testing.T) {
+	r := bareRuntimeForCreateTest(t, 4)
+	queued := &task.Task{ID: "task_queued_restart", Input: "not yet claimed", Status: task.Queued, Error: "stale", PendingApproval: "stale"}
+	if err := r.tasks.Save(queued); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(r.queue); got != 1 {
+		t.Fatalf("queued task recovery queue=%d, want 1", got)
+	}
+	select {
+	case id := <-r.queue:
+		if id != queued.ID {
+			t.Fatalf("recovered wrong task id=%s want=%s", id, queued.ID)
+		}
+	default:
+		t.Fatal("queued task was not re-enqueued")
+	}
+	stored, err := r.Task(queued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != task.Queued || stored.Error != "" || stored.PendingApproval != "" {
+		t.Fatalf("queued recovery did not normalize transient fields: %#v", stored)
 	}
 }
 
