@@ -112,9 +112,13 @@ func main() {
 	coreHandler := coreServer.Handler()
 	root := http.NewServeMux()
 
-	// Runtime reconciliation is an exact admin-only route. It is intentionally
-	// outside MCP/A2A/model tools: ambiguous side effects require operator review.
+	// Runtime reconciliation and staged approval decisions are exact admin-only
+	// routes. They stay outside MCP/A2A/model tools because ambiguous side effects
+	// and trust expansion require operator review.
 	root.Handle("POST /v1/tasks/{id}/reconcile", coreServer.TaskReconciliationHandler())
+	approvalV14 := coreServer.ApprovalDecisionV14Handler()
+	root.Handle("POST /v1/approvals/{id}", approvalV14)
+	root.Handle("POST /v1/approvals/{id}/decision", approvalV14)
 
 	// Scoped platform API: legacy admin secret remains accepted, while durable
 	// access keys are evaluated against the path-level read/write/automation/admin
