@@ -139,7 +139,7 @@ func NewClient(settings Settings, version string) (*Client, error) {
 		token:   settings.NodeToken,
 		version: version,
 		http: &http.Client{
-			Timeout: settings.RequestTimeout,
+			Timeout:       settings.RequestTimeout,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 		},
 	}, nil
