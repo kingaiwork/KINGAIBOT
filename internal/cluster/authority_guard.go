@@ -23,12 +23,12 @@ type AuthorityChecker interface {
 }
 
 type JobAuthorityBinding struct {
-	JobID                 string    `json:"job_id"`
-	AuthorityID           string    `json:"authority_id"`
-	RequiredCapabilities  []string  `json:"required_capabilities,omitempty"`
-	RequiredDataScopes    []string  `json:"required_data_scopes,omitempty"`
-	RequiredTool          string    `json:"required_tool,omitempty"`
-	CreatedAt             time.Time `json:"created_at"`
+	JobID                string    `json:"job_id"`
+	AuthorityID          string    `json:"authority_id"`
+	RequiredCapabilities []string  `json:"required_capabilities,omitempty"`
+	RequiredDataScopes   []string  `json:"required_data_scopes,omitempty"`
+	RequiredTool         string    `json:"required_tool,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
 }
 
 // AuthorizedJobRequest is the external job-submission shape when an authority
@@ -176,6 +176,9 @@ func (c *Coordinator) SubmitAuthorized(in Job, authorityID string, dataScopes []
 	requiredTool = strings.TrimSpace(requiredTool)
 	if len(requiredTool) > 256 {
 		return nil, errors.New("required_tool must be <= 256 bytes")
+	}
+	if len(normalized.RequiredCapabilities) == 0 && len(dataScopes) == 0 && requiredTool == "" {
+		return nil, errors.New("authority-bound job must declare a required capability, data scope or tool")
 	}
 	binding := &JobAuthorityBinding{
 		AuthorityID:          authorityID,
