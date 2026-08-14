@@ -2,11 +2,12 @@
 
 ## English
 
-KINGAIBOT is a long-term kingai.work project building a secure, durable and extensible execution layer for the KING AI intelligent-lifeform system. Documentation is organized around product definition, usage, architecture, security, evolution and future development.
+KINGAIBOT is a long-term kingai.work project building a secure, durable and extensible execution layer for the KING AI intelligent-lifeform system. Documentation is organized around product definition, usage, architecture, platform capabilities, security, evolution and future development.
 
 Start here:
 
 - [Product Definition](PRODUCT.md)
+- [V1.3 Platform Control Plane](PLATFORM.md)
 - [User & Operations Guide](USAGE.md)
 - [Long-Term Roadmap](ROADMAP.md)
 - [Future Technology Integration](FUTURE-TECHNOLOGY.md)
@@ -29,11 +30,12 @@ Contact: vip@kingai.work
 
 ## 中文
 
-KINGAIBOT 是 kingai.work 的长期研发项目，目标是构建 KING AI 智慧生命体的安全、可靠、可扩展终端执行层。文档围绕产品定位、使用、架构、安全、进化与未来发展组织。
+KINGAIBOT 是 kingai.work 的长期研发项目，目标是构建 KING AI 智慧生命体的安全、可靠、可扩展终端执行层。文档围绕产品定位、使用、平台能力、架构、安全、进化与未来发展组织。
 
 建议入口：
 
 - [产品定义](PRODUCT.md)
+- [V1.3 平台控制平面](PLATFORM.md)
 - [使用与运维手册](USAGE.md)
 - [长期路线图](ROADMAP.md)
 - [未来技术融合计划](FUTURE-TECHNOLOGY.md)
