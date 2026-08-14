@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -47,14 +48,12 @@ type IssuedAccessKey struct {
 
 func (m *Manager) ensureIdentityDirs() error {
 	for _, name := range []string{"identities", "access-keys"} {
-		if err := os.MkdirAll(pathJoin(m.dir, name), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(m.dir, name), 0o700); err != nil {
 			return err
 		}
 	}
 	return nil
 }
-
-func pathJoin(parts ...string) string { return strings.Join(parts, string(os.PathSeparator)) }
 
 func normalizeRole(role string) (string, error) {
 	role = strings.ToLower(strings.TrimSpace(role))
@@ -161,10 +160,21 @@ func (m *Manager) CreateIdentity(in Identity) (*Identity, error) {
 	m.mu.Lock()
 	err = m.save("identities", id, &in)
 	m.mu.Unlock()
-	if err == nil {
-		err = m.audit("identity.created", map[string]any{"identity_id": id, "roles": roles, "permissions": perms})
+	if err != nil {
+		return nil, err
 	}
-	return &in, err
+	if err = m.audit("identity.created", map[string]any{"identity_id": id, "roles": roles, "permissions": perms}); err != nil {
+		// Identity creation without durable audit must not create usable authority.
+		disabledAt := now()
+		in.Enabled = false
+		in.DisabledAt = &disabledAt
+		in.UpdatedAt = disabledAt
+		m.mu.Lock()
+		_ = m.save("identities", id, &in)
+		m.mu.Unlock()
+		return nil, fmt.Errorf("identity persisted but disabled because audit failed: %w", err)
+	}
+	return &in, nil
 }
 
 func (m *Manager) Identity(id string) (*Identity, error) {
@@ -186,7 +196,7 @@ func (m *Manager) Identities() ([]*Identity, error) {
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out, err := listJSON[Identity](pathJoin(m.dir, "identities"))
+	out, err := listJSON[Identity](filepath.Join(m.dir, "identities"))
 	if err == nil {
 		sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	}
@@ -195,9 +205,9 @@ func (m *Manager) Identities() ([]*Identity, error) {
 
 func (m *Manager) SetIdentityEnabled(id string, enabled bool) (*Identity, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	var v Identity
 	if err := m.read("identities", id, &v); err != nil {
+		m.mu.Unlock()
 		return nil, err
 	}
 	v.Enabled, v.UpdatedAt = enabled, now()
@@ -208,9 +218,23 @@ func (m *Manager) SetIdentityEnabled(id string, enabled bool) (*Identity, error)
 		v.DisabledAt = &t
 	}
 	if err := m.save("identities", id, &v); err != nil {
+		m.mu.Unlock()
 		return nil, err
 	}
-	_ = m.audit("identity.enabled", map[string]any{"identity_id": id, "enabled": enabled})
+	m.mu.Unlock()
+	if err := m.audit("identity.enabled", map[string]any{"identity_id": id, "enabled": enabled}); err != nil {
+		// An unaudited enable is unsafe; force disabled. An unaudited disable stays disabled.
+		if enabled {
+			t := now()
+			v.Enabled = false
+			v.DisabledAt = &t
+			v.UpdatedAt = t
+			m.mu.Lock()
+			_ = m.save("identities", id, &v)
+			m.mu.Unlock()
+		}
+		return nil, fmt.Errorf("identity state change audit failed: %w", err)
+	}
 	return &v, nil
 }
 
@@ -260,8 +284,14 @@ func (m *Manager) IssueAccessKey(identityID string, ttlSeconds int64) (*IssuedAc
 	if err != nil {
 		return nil, err
 	}
-	if err := m.audit("access_key.issued", map[string]any{"key_id": keyID, "identity_id": identityID, "expires_at": key.ExpiresAt}); err != nil {
-		return nil, err
+	if err = m.audit("access_key.issued", map[string]any{"key_id": keyID, "identity_id": identityID, "expires_at": key.ExpiresAt}); err != nil {
+		// Never return a usable secret whose issuance was not durably audited.
+		t := now()
+		key.RevokedAt = &t
+		m.mu.Lock()
+		_ = m.save("access-keys", keyID, &key)
+		m.mu.Unlock()
+		return nil, fmt.Errorf("access key revoked because issuance audit failed: %w", err)
 	}
 	return &IssuedAccessKey{AccessKey: key, Token: token}, nil
 }
@@ -284,7 +314,7 @@ func (m *Manager) AccessKeys() ([]*AccessKey, error) {
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out, err := listJSON[AccessKey](pathJoin(m.dir, "access-keys"))
+	out, err := listJSON[AccessKey](filepath.Join(m.dir, "access-keys"))
 	if err == nil {
 		sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	}
@@ -293,9 +323,9 @@ func (m *Manager) AccessKeys() ([]*AccessKey, error) {
 
 func (m *Manager) RevokeAccessKey(id string) (*AccessKey, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	var k AccessKey
 	if err := m.read("access-keys", id, &k); err != nil {
+		m.mu.Unlock()
 		return nil, err
 	}
 	if k.RevokedAt == nil {
@@ -303,9 +333,13 @@ func (m *Manager) RevokeAccessKey(id string) (*AccessKey, error) {
 		k.RevokedAt = &t
 	}
 	if err := m.save("access-keys", id, &k); err != nil {
+		m.mu.Unlock()
 		return nil, err
 	}
-	_ = m.audit("access_key.revoked", map[string]any{"key_id": id, "identity_id": k.IdentityID})
+	m.mu.Unlock()
+	if err := m.audit("access_key.revoked", map[string]any{"key_id": id, "identity_id": k.IdentityID}); err != nil {
+		return nil, fmt.Errorf("access key revoked but audit append failed: %w", err)
+	}
 	return &k, nil
 }
 
@@ -363,9 +397,7 @@ func constantTokenEqual(a, b string) bool {
 	return len(a) == len(b) && len(a) > 0 && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-// ScopedAuthHandler accepts the existing environment admin token or a scoped
-// durable platform access key. Existing deployments remain backward compatible.
-func (m *Manager) ScopedAuthHandler(adminTokenEnv string, next http.Handler) http.Handler {
+func (m *Manager) authWithPermission(adminTokenEnv, permission string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
 		if token == "" {
@@ -377,10 +409,24 @@ func (m *Manager) ScopedAuthHandler(adminTokenEnv string, next http.Handler) htt
 			next.ServeHTTP(w, r)
 			return
 		}
-		if _, err := m.AuthenticateAccessToken(token, requestPermission(r)); err != nil {
+		if _, err := m.AuthenticateAccessToken(token, permission); err != nil {
 			http.Error(w, "valid scoped platform token required", http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// ScopedAuthHandler accepts the existing environment admin token or a scoped
+// durable platform access key. Existing deployments remain backward compatible.
+func (m *Manager) ScopedAuthHandler(adminTokenEnv string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.authWithPermission(adminTokenEnv, requestPermission(r), next).ServeHTTP(w, r)
+	})
+}
+
+// AdminAuthHandler protects identity/key lifecycle operations. Only the legacy
+// environment admin token or an identity with platform.admin/platform.* may use it.
+func (m *Manager) AdminAuthHandler(adminTokenEnv string, next http.Handler) http.Handler {
+	return m.authWithPermission(adminTokenEnv, "platform.admin", next)
 }
