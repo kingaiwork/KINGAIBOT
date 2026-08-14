@@ -124,3 +124,55 @@ func TestStatusSnapshotSurfacesRuntimeReconciliationAttention(t *testing.T) {
 		t.Fatalf("task status map missing reconciliation: %#v", status.TaskStatuses)
 	}
 }
+
+func TestStatusSnapshotDoesNotTreatInboundProcessingAsReconciliation(t *testing.T) {
+	m := newStatusManager(t, newStatusRuntime())
+	if err := m.ensureInboundDir(); err != nil {
+		t.Fatal(err)
+	}
+	receipt := &InboundReceipt{
+		ID:        "in_status_processing",
+		ChannelID: "channel_status",
+		EventID:   "event_status",
+		Sender:    "sender_status",
+		Status:    "processing",
+		CreatedAt: now(),
+		UpdatedAt: now(),
+	}
+	m.mu.Lock()
+	err := m.save("inbound-receipts", receipt.ID, receipt)
+	m.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := m.StatusSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.AttentionRequired {
+		t.Fatalf("normal inbound processing triggered attention: %#v", status.Counts)
+	}
+	if status.Counts["inbound_receipts_processing"] != 1 {
+		t.Fatalf("processing receipt count=%d, want 1", status.Counts["inbound_receipts_processing"])
+	}
+	if status.Counts["inbound_receipts_reconciliation"] != 0 {
+		t.Fatalf("processing receipt counted as reconciliation: %#v", status.Counts)
+	}
+
+	receipt.Status = "reconciliation"
+	receipt.UpdatedAt = now()
+	m.mu.Lock()
+	err = m.save("inbound-receipts", receipt.ID, receipt)
+	m.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err = m.StatusSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.AttentionRequired || status.Counts["inbound_receipts_reconciliation"] != 1 {
+		t.Fatalf("reconciliation receipt did not trigger attention: %#v", status.Counts)
+	}
+}
