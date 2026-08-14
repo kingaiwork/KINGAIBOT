@@ -113,6 +113,9 @@ func permissionAllows(grants map[string]struct{}, need string) bool {
 	return ok
 }
 
+// CreateIdentity persists an inert disabled identity first. The identity is
+// enabled only after its creation audit is durable. Holding the Manager lock
+// across the transition prevents a concurrent enable from racing creation.
 func (m *Manager) CreateIdentity(in Identity) (*Identity, error) {
 	if err := m.ensureIdentityDirs(); err != nil {
 		return nil, err
@@ -155,24 +158,22 @@ func (m *Manager) CreateIdentity(in Identity) (*Identity, error) {
 		return nil, err
 	}
 	t := now()
-	in.ID, in.Name, in.Roles, in.Permissions, in.Enabled = id, name, roles, perms, true
-	in.CreatedAt, in.UpdatedAt, in.DisabledAt = t, t, nil
+	disabledAt := t
+	in.ID, in.Name, in.Roles, in.Permissions, in.Enabled = id, name, roles, perms, false
+	in.CreatedAt, in.UpdatedAt, in.DisabledAt = t, t, &disabledAt
 	m.mu.Lock()
-	err = m.save("identities", id, &in)
-	m.mu.Unlock()
-	if err != nil {
+	defer m.mu.Unlock()
+	if err := m.save("identities", id, &in); err != nil {
 		return nil, err
 	}
-	if err = m.audit("identity.created", map[string]any{"identity_id": id, "roles": roles, "permissions": perms}); err != nil {
-		// Identity creation without durable audit must not create usable authority.
-		disabledAt := now()
-		in.Enabled = false
-		in.DisabledAt = &disabledAt
-		in.UpdatedAt = disabledAt
-		m.mu.Lock()
-		_ = m.save("identities", id, &in)
-		m.mu.Unlock()
-		return nil, fmt.Errorf("identity persisted but disabled because audit failed: %w", err)
+	if err := m.audit("identity.created", map[string]any{"identity_id": id, "roles": roles, "permissions": perms}); err != nil {
+		return nil, fmt.Errorf("identity remains disabled because creation audit failed: %w", err)
+	}
+	in.Enabled = true
+	in.DisabledAt = nil
+	in.UpdatedAt = now()
+	if err := m.save("identities", id, &in); err != nil {
+		return nil, fmt.Errorf("identity creation was audited but activation persistence failed: %w", err)
 	}
 	return &in, nil
 }
@@ -203,37 +204,39 @@ func (m *Manager) Identities() ([]*Identity, error) {
 	return out, err
 }
 
+// SetIdentityEnabled is directional: enabling is audited before persistence;
+// disabling is persisted first and never rolled back on audit failure.
 func (m *Manager) SetIdentityEnabled(id string, enabled bool) (*Identity, error) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	var v Identity
 	if err := m.read("identities", id, &v); err != nil {
-		m.mu.Unlock()
 		return nil, err
 	}
-	v.Enabled, v.UpdatedAt = enabled, now()
+	if v.Enabled == enabled {
+		return &v, nil
+	}
 	if enabled {
+		if err := m.audit("identity.enabled", map[string]any{"identity_id": id, "enabled": true}); err != nil {
+			return nil, fmt.Errorf("identity remains disabled because enable audit failed: %w", err)
+		}
+		v.Enabled = true
 		v.DisabledAt = nil
-	} else {
-		t := now()
-		v.DisabledAt = &t
+		v.UpdatedAt = now()
+		if err := m.save("identities", id, &v); err != nil {
+			return nil, fmt.Errorf("identity enable was audited but persistence failed: %w", err)
+		}
+		return &v, nil
 	}
+	v.Enabled = false
+	t := now()
+	v.DisabledAt = &t
+	v.UpdatedAt = t
 	if err := m.save("identities", id, &v); err != nil {
-		m.mu.Unlock()
 		return nil, err
 	}
-	m.mu.Unlock()
-	if err := m.audit("identity.enabled", map[string]any{"identity_id": id, "enabled": enabled}); err != nil {
-		// An unaudited enable is unsafe; force disabled. An unaudited disable stays disabled.
-		if enabled {
-			t := now()
-			v.Enabled = false
-			v.DisabledAt = &t
-			v.UpdatedAt = t
-			m.mu.Lock()
-			_ = m.save("identities", id, &v)
-			m.mu.Unlock()
-		}
-		return nil, fmt.Errorf("identity state change audit failed: %w", err)
+	if err := m.audit("identity.enabled", map[string]any{"identity_id": id, "enabled": false}); err != nil {
+		return nil, fmt.Errorf("identity remains disabled but disable audit failed: %w", err)
 	}
 	return &v, nil
 }
@@ -250,6 +253,9 @@ func generateAccessToken(keyID string) (token string, prefix string, digest stri
 	return token, prefix, hex.EncodeToString(h[:]), nil
 }
 
+// IssueAccessKey stores the key initially revoked. The secret is returned only
+// after the issuance audit is durable and the revocation marker is atomically
+// cleared. A crash at any earlier point leaves an unusable credential.
 func (m *Manager) IssueAccessKey(identityID string, ttlSeconds int64) (*IssuedAccessKey, error) {
 	if err := m.ensureIdentityDirs(); err != nil {
 		return nil, err
@@ -273,25 +279,23 @@ func (m *Manager) IssueAccessKey(identityID string, ttlSeconds int64) (*IssuedAc
 		return nil, err
 	}
 	created := now()
-	key := AccessKey{ID: keyID, IdentityID: identityID, Prefix: prefix, TokenHash: digest, CreatedAt: created}
+	stagedAt := created
+	key := AccessKey{ID: keyID, IdentityID: identityID, Prefix: prefix, TokenHash: digest, CreatedAt: created, RevokedAt: &stagedAt}
 	if ttlSeconds > 0 {
 		expires := created.Add(time.Duration(ttlSeconds) * time.Second)
 		key.ExpiresAt = &expires
 	}
 	m.mu.Lock()
-	err = m.save("access-keys", keyID, &key)
-	m.mu.Unlock()
-	if err != nil {
+	defer m.mu.Unlock()
+	if err := m.save("access-keys", keyID, &key); err != nil {
 		return nil, err
 	}
-	if err = m.audit("access_key.issued", map[string]any{"key_id": keyID, "identity_id": identityID, "expires_at": key.ExpiresAt}); err != nil {
-		// Never return a usable secret whose issuance was not durably audited.
-		t := now()
-		key.RevokedAt = &t
-		m.mu.Lock()
-		_ = m.save("access-keys", keyID, &key)
-		m.mu.Unlock()
-		return nil, fmt.Errorf("access key revoked because issuance audit failed: %w", err)
+	if err := m.audit("access_key.issued", map[string]any{"key_id": keyID, "identity_id": identityID, "expires_at": key.ExpiresAt}); err != nil {
+		return nil, fmt.Errorf("access key remains revoked because issuance audit failed: %w", err)
+	}
+	key.RevokedAt = nil
+	if err := m.save("access-keys", keyID, &key); err != nil {
+		return nil, fmt.Errorf("access key issuance was audited but activation persistence failed: %w", err)
 	}
 	return &IssuedAccessKey{AccessKey: key, Token: token}, nil
 }
