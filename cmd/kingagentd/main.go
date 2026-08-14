@@ -80,7 +80,7 @@ func main() {
 	pm, mustErr := platform.NewSafe(filepath.Join(cfg.Runtime.DataDir, "platform"), boundPlatformRuntime, el)
 	must(mustErr)
 	defer pm.Close()
-	platformExtension, mustErr := platform.NewSafeExtension(pm)
+	platformExtension, mustErr := platform.NewV14Extension(pm)
 	must(mustErr)
 	tr.RegisterExtension(platformExtension)
 
