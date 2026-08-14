@@ -52,10 +52,10 @@ func newBridgeHarness(t *testing.T) *bridgeHarness {
 func (h *bridgeHarness) createExecutableGraph(t *testing.T, owner string) *workgraph.Graph {
 	t.Helper()
 	graph, err := h.graphs.Create("write a verified remote artifact", []workgraph.Node{{
-		ID:    "write",
-		Type:  workgraph.TypeExecute,
-		Owner: owner,
-		Risk:  workgraph.RiskHigh,
+		ID:     "write",
+		Type:   workgraph.TypeExecute,
+		Owner:  owner,
+		Risk:   workgraph.RiskHigh,
 		Replay: workgraph.ReplayManual,
 		Inputs: map[string]any{"cluster": map[string]any{
 			"kind":                  "file.write",
@@ -197,7 +197,7 @@ func TestMidFlightAuthorityRevocationMovesGraphToReconciliation(t *testing.T) {
 
 	// Human/admin reconciliation may accept already-observed external evidence
 	// even though the original execution authority is now revoked.
-	if _, err := h.cluster.Reconcile(binding.JobID, "complete", "verified remote state", json.RawMessage(`{"remote_id":"uncertain","verified":true}`)); err != nil {
+	if _, err := h.cluster.ReconcileAuthorized(binding.JobID, "complete", "verified remote state", json.RawMessage(`{"remote_id":"uncertain","verified":true}`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.bridge.Sync(); err != nil {
@@ -227,10 +227,10 @@ func TestDispatchWithoutTrustedOwnerAuthorityFailsBeforeGraphStart(t *testing.T)
 	}
 }
 
-func TestClusterRequeueResumesReconcilingGraph(t *testing.T) {
+func TestRevokedAuthorityCannotRequeueReconciledJob(t *testing.T) {
 	h := newBridgeHarness(t)
 	owner := "agent_gamma"
-	h.createAuthority(t, owner)
+	grant := h.createAuthority(t, owner)
 	graph := h.createExecutableGraph(t, owner)
 	binding, err := h.bridge.Dispatch(graph.ID, "write")
 	if err != nil {
@@ -248,9 +248,7 @@ func TestClusterRequeueResumesReconcilingGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Force the authority checker to deny completion without destroying the
-	// grant object; this simulates an execution-time policy loss.
-	if _, err := h.authorities.Revoke(binding.AuthorityID); err != nil {
+	if _, err := h.authorities.Revoke(grant.Envelope.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.cluster.CompleteAuthorized(worker, binding.JobID, lease.LeaseToken, json.RawMessage(`{"maybe":true}`), ""); err != nil {
@@ -259,17 +257,14 @@ func TestClusterRequeueResumesReconcilingGraph(t *testing.T) {
 	if err := h.bridge.Sync(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.cluster.Reconcile(binding.JobID, "requeue", "operator confirmed no side effect", nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.bridge.Sync(); err != nil {
-		t.Fatal(err)
+	if _, err := h.cluster.ReconcileAuthorized(binding.JobID, "requeue", "operator requested retry", nil); err == nil {
+		t.Fatal("revoked execution authority unexpectedly allowed reconciliation requeue")
 	}
 	storedGraph, err := h.graphs.Get(graph.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if storedGraph.Nodes["write"].State != workgraph.StateRunning {
-		t.Fatalf("expected resumed running graph after cluster requeue, got %s", storedGraph.Nodes["write"].State)
+	if storedGraph.Nodes["write"].State != workgraph.StateReconciling {
+		t.Fatalf("blocked requeue changed graph state to %s", storedGraph.Nodes["write"].State)
 	}
 }
