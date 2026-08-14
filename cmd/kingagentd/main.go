@@ -64,7 +64,16 @@ func main() {
 	rt := karuntime.New(ts, as, el, ms, ae, es, cfg)
 	defer rt.Close()
 
-	pm, mustErr := platform.New(filepath.Join(cfg.Runtime.DataDir, "platform"), rt, el)
+	// Authority exists before platform task creation so trusted agent identity
+	// can be resolved into durable task metadata. Models never provide this ID.
+	authorityStore, mustErr := authority.NewStore(filepath.Join(cfg.Runtime.DataDir, "authority"), el)
+	must(mustErr)
+	boundPlatformRuntime, mustErr := authority.NewBoundTaskRuntime(rt, authorityStore)
+	must(mustErr)
+	taskAuthorityResolver, mustErr := authority.NewTaskAuthorityResolver(ts)
+	must(mustErr)
+
+	pm, mustErr := platform.New(filepath.Join(cfg.Runtime.DataDir, "platform"), boundPlatformRuntime, el)
 	must(mustErr)
 	defer pm.Close()
 	tr.RegisterExtension(pm)
@@ -75,6 +84,8 @@ func main() {
 
 	cc, mustErr := cluster.New(filepath.Join(cfg.Runtime.DataDir, "cluster"), el)
 	must(mustErr)
+	must(cc.SetAuthorityChecker(authorityStore))
+	must(cc.SetTaskAuthorityResolver(taskAuthorityResolver))
 	tr.RegisterExtension(cc)
 
 	ec, mustErr := evolution.NewController(es, el)
@@ -83,10 +94,6 @@ func main() {
 
 	wgs, mustErr := workgraph.NewStore(filepath.Join(cfg.Runtime.DataDir, "workgraphs"), el)
 	must(mustErr)
-
-	authorityStore, mustErr := authority.NewStore(filepath.Join(cfg.Runtime.DataDir, "authority"), el)
-	must(mustErr)
-	must(cc.SetAuthorityChecker(authorityStore))
 
 	must(rt.Recover())
 
