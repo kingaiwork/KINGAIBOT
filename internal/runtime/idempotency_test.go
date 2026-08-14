@@ -116,6 +116,28 @@ func TestRecoverRequeuesQueuedTask(t *testing.T) {
 	}
 }
 
+func TestCancelRejectsAmbiguousCompletionStates(t *testing.T) {
+	for _, status := range []task.Status{task.Completing, task.Reconciliation} {
+		t.Run(string(status), func(t *testing.T) {
+			r := bareRuntimeForCreateTest(t, 1)
+			candidate := &task.Task{ID: "task_cancel_" + string(status), Input: "ambiguous", Status: status, Output: "possible side effect"}
+			if err := r.tasks.Save(candidate); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.Cancel(candidate.ID); err == nil || !strings.Contains(err.Error(), "requires reconciliation") {
+				t.Fatalf("Cancel(%s) error=%v, want reconciliation rejection", status, err)
+			}
+			stored, err := r.Task(candidate.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Status != status {
+				t.Fatalf("Cancel changed ambiguous task from %s to %s", status, stored.Status)
+			}
+		})
+	}
+}
+
 func TestCreateIdempotentReturnsExistingTaskWithoutDuplicateQueue(t *testing.T) {
 	r := bareRuntimeForCreateTest(t, 4)
 	first, err := r.CreateIdempotent("one durable action", map[string]any{"source": "workflow"}, "wf_run_1:step_1")
