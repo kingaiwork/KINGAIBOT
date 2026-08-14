@@ -2,4 +2,4 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-exec "$ROOT/scripts/build-release-v14.sh" "$@"
+exec bash "$ROOT/scripts/build-release-v14.sh" "$@"
