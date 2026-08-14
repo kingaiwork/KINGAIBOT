@@ -5,12 +5,15 @@ import (
 	"strings"
 )
 
-// ApprovalDecisionV14Handler is mounted as an exact admin route by kingagentd.
-// It overrides the compatibility approval decision endpoint so production
-// approval trust uses Runtime's staged, audit-backed V14 state machine.
+// ApprovalDecisionV14Handler is mounted on exact admin routes by kingagentd.
+// Both the compatibility endpoint and the explicit /decision endpoint use the
+// staged, audit-backed V14 state machine so production traffic cannot fall back
+// to the legacy persist-first approval transition.
 func (s *Server) ApprovalDecisionV14Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("POST /v1/approvals/{id}/decision", s.authEnv(s.cfg.Server.AdminTokenEnv, http.HandlerFunc(s.approvalDecisionV14)))
+	handler := s.authEnv(s.cfg.Server.AdminTokenEnv, http.HandlerFunc(s.approvalDecisionV14))
+	mux.Handle("POST /v1/approvals/{id}", handler)
+	mux.Handle("POST /v1/approvals/{id}/decision", handler)
 	return s.security(s.cors(s.limit(mux)))
 }
 
