@@ -17,7 +17,7 @@ jobs:
           go-version: '1.26.6'
       - name: Format v1.3 Go sources
         run: |
-          gofmt -w cmd/kingagentd/main.go internal/agent/agent.go internal/platform/*.go internal/tool/extensions*.go
+          gofmt -w cmd/kingagentd/main.go internal/agent/agent.go internal/platform/*.go internal/knowledge/*.go internal/cluster/*.go internal/tool/extensions*.go
           if git diff --quiet; then
             echo "Already formatted"
             exit 0
@@ -25,6 +25,6 @@ jobs:
           git config user.name "kingaibot-ci"
           git config user.email "actions@users.noreply.github.com"
           git add -u
-          git add internal/platform internal/tool/extensions.go internal/tool/extensions_test.go
+          git add internal/platform internal/knowledge internal/cluster internal/tool/extensions.go internal/tool/extensions_test.go
           git commit -m "Format v1.3 platform sources"
           git push origin HEAD:agent/v1.3-platform
