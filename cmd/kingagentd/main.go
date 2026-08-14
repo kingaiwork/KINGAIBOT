@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/eventlog"
 	"github.com/kingaiwork/KINGAIBOT/internal/evolution"
 	"github.com/kingaiwork/KINGAIBOT/internal/memory"
+	"github.com/kingaiwork/KINGAIBOT/internal/platform"
 	"github.com/kingaiwork/KINGAIBOT/internal/policy"
 	"github.com/kingaiwork/KINGAIBOT/internal/provider"
 	karuntime "github.com/kingaiwork/KINGAIBOT/internal/runtime"
@@ -26,7 +29,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/tool"
 )
 
-var version = "1.2.0"
+var version = "1.3.0"
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "configuration file")
@@ -58,10 +61,22 @@ func main() {
 	ae := agent.New(cfg, pc, tr, ms)
 	rt := karuntime.New(ts, as, el, ms, ae, es, cfg)
 	defer rt.Close()
+
+	pm, mustErr := platform.New(filepath.Join(cfg.Runtime.DataDir, "platform"), rt, el)
+	must(mustErr)
+	defer pm.Close()
+	tr.RegisterExtension(pm)
+
 	must(rt.Recover())
-	srv := &http.Server{Addr: cfg.Server.Listen, Handler: api.New(cfg, rt, tr).Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
+
+	coreHandler := api.New(cfg, rt, tr).Handler()
+	root := http.NewServeMux()
+	root.Handle("/v1/platform/", bearerEnv(cfg.Server.AdminTokenEnv, pm.Handler()))
+	root.Handle("/", coreHandler)
+
+	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version)
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "enabled")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
@@ -74,6 +89,27 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
+}
+
+func bearerEnv(envName string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		expected := os.Getenv(envName)
+		if len(expected) < 32 {
+			http.Error(w, "server authentication is not configured", http.StatusInternalServerError)
+			return
+		}
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") {
+			http.Error(w, "bearer token required", http.StatusUnauthorized)
+			return
+		}
+		got := strings.TrimPrefix(auth, "Bearer ")
+		if len(got) != len(expected) || subtle.ConstantTimeCompare([]byte(got), []byte(expected)) != 1 {
+			http.Error(w, "valid bearer token required", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func must(err error) {
