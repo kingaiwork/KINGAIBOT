@@ -21,7 +21,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/platform"
 )
 
-var version = "1.3.0"
+var version = "1.4.0"
 
 func main() {
 	listen := flag.String("listen", "127.0.0.1:18889", "console listen address")
@@ -137,7 +137,7 @@ func newAPIProxy(base string) http.Handler {
 				req.Header.Set(name, value)
 			}
 		}
-		req.Header.Set("User-Agent", "KINGAIBOT-Console/1.3")
+		req.Header.Set("User-Agent", "KINGAIBOT-Console/1.4")
 		resp, err := client.Do(req)
 		if err != nil {
 			http.Error(w, "upstream unavailable", http.StatusBadGateway)
