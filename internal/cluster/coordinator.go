@@ -152,6 +152,9 @@ func constantHashEqual(raw, expectedHash string) bool {
 func (c *Coordinator) workerPath(id string) (string, error) { return idPath(c.dir, "workers", id) }
 func (c *Coordinator) jobPath(id string) (string, error)    { return idPath(c.dir, "jobs", id) }
 
+// RegisterWorker persists the credential verifier in a disabled state first.
+// The worker is enabled only after the registration audit is durable, so a
+// crash can never leave an unaudited credential usable after restart.
 func (c *Coordinator) RegisterWorker(name string, caps []string, metadata map[string]any) (*IssuedWorker, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 128 {
@@ -167,25 +170,27 @@ func (c *Coordinator) RegisterWorker(name string, caps []string, metadata map[st
 	}
 	token := "kaw_" + id + "_" + secret
 	n := time.Now().UTC()
-	w := Worker{ID: id, Name: name, Capabilities: normalizeCaps(caps), TokenPrefix: secret[:12], TokenHash: sha(token), Enabled: true, Metadata: metadata, CreatedAt: n, UpdatedAt: n, LastSeenAt: n}
+	w := Worker{ID: id, Name: name, Capabilities: normalizeCaps(caps), TokenPrefix: secret[:12], TokenHash: sha(token), Enabled: false, Metadata: metadata, CreatedAt: n, UpdatedAt: n, LastSeenAt: n}
 	path, err := c.workerPath(id)
 	if err != nil {
 		return nil, err
 	}
 	c.mu.Lock()
-	err = save(path, &w)
-	c.mu.Unlock()
-	if err != nil {
+	if err := save(path, &w); err != nil {
+		c.mu.Unlock()
 		return nil, err
 	}
 	if err := c.events.Append(eventlog.Event{Type: "cluster.worker.registered", Data: map[string]any{"worker_id": id, "capabilities": w.Capabilities}}); err != nil {
-		w.Enabled = false
-		w.UpdatedAt = time.Now().UTC()
-		c.mu.Lock()
-		_ = save(path, &w)
 		c.mu.Unlock()
-		return nil, fmt.Errorf("worker disabled because registration audit failed: %w", err)
+		return nil, fmt.Errorf("worker remains disabled because registration audit failed: %w", err)
 	}
+	w.Enabled = true
+	w.UpdatedAt = time.Now().UTC()
+	if err := save(path, &w); err != nil {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("worker was audited but enable persistence failed: %w", err)
+	}
+	c.mu.Unlock()
 	return &IssuedWorker{Worker: w, Token: token}, nil
 }
 
@@ -257,31 +262,42 @@ func (c *Coordinator) Workers() ([]*Worker, error) {
 	return out, nil
 }
 
+// SetWorkerEnabled orders trust transitions conservatively. Enabling is audited
+// before persistence; disabling is persisted before audit and is never rolled
+// back on audit failure because that would re-expand authority.
 func (c *Coordinator) SetWorkerEnabled(id string, enabled bool) (*Worker, error) {
 	path, err := c.workerPath(id)
 	if err != nil {
 		return nil, err
 	}
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	var w Worker
 	if err := read(path, &w); err != nil {
-		c.mu.Unlock()
 		return nil, err
 	}
-	w.Enabled, w.UpdatedAt = enabled, time.Now().UTC()
-	if err := save(path, &w); err != nil {
-		c.mu.Unlock()
-		return nil, err
+	if w.Enabled == enabled {
+		w.TokenHash = ""
+		return &w, nil
 	}
-	c.mu.Unlock()
-	if err := c.events.Append(eventlog.Event{Type: "cluster.worker.enabled", Data: map[string]any{"worker_id": id, "enabled": enabled}}); err != nil {
-		if enabled {
-			w.Enabled = false
-			c.mu.Lock()
-			_ = save(path, &w)
-			c.mu.Unlock()
+	if enabled {
+		if err := c.events.Append(eventlog.Event{Type: "cluster.worker.enabled", Data: map[string]any{"worker_id": id, "enabled": true}}); err != nil {
+			return nil, fmt.Errorf("worker remains disabled because enable audit failed: %w", err)
 		}
-		return nil, err
+		w.Enabled = true
+		w.UpdatedAt = time.Now().UTC()
+		if err := save(path, &w); err != nil {
+			return nil, fmt.Errorf("worker enable was audited but persistence failed: %w", err)
+		}
+	} else {
+		w.Enabled = false
+		w.UpdatedAt = time.Now().UTC()
+		if err := save(path, &w); err != nil {
+			return nil, err
+		}
+		if err := c.events.Append(eventlog.Event{Type: "cluster.worker.enabled", Data: map[string]any{"worker_id": id, "enabled": false}}); err != nil {
+			return nil, fmt.Errorf("worker remains disabled but disable audit failed: %w", err)
+		}
 	}
 	w.TokenHash = ""
 	return &w, nil
@@ -315,6 +331,9 @@ func normalizeJob(in Job) (Job, error) {
 	return in, nil
 }
 
+// Submit uses an inert pending_audit state until the submission audit is
+// durable. LeaseJob only selects queued jobs, so neither a concurrent Worker
+// nor a crash can expose unaudited work.
 func (c *Coordinator) Submit(in Job) (*Job, error) {
 	in, err := normalizeJob(in)
 	if err != nil {
@@ -325,26 +344,28 @@ func (c *Coordinator) Submit(in Job) (*Job, error) {
 		return nil, err
 	}
 	n := time.Now().UTC()
-	in.ID, in.Status, in.CreatedAt, in.UpdatedAt = id, "queued", n, n
+	in.ID, in.Status, in.CreatedAt, in.UpdatedAt = id, "pending_audit", n, n
 	in.LeaseOwner, in.LeaseTokenHash, in.LeaseExpiresAt = "", "", nil
 	path, err := c.jobPath(id)
 	if err != nil {
 		return nil, err
 	}
 	c.mu.Lock()
-	err = save(path, &in)
-	c.mu.Unlock()
-	if err != nil {
+	defer c.mu.Unlock()
+	if err := save(path, &in); err != nil {
 		return nil, err
 	}
 	if err := c.events.Append(eventlog.Event{Type: "cluster.job.submitted", Data: map[string]any{"job_id": id, "kind": in.Kind, "required_capabilities": in.RequiredCapabilities, "replay_policy": in.ReplayPolicy}}); err != nil {
 		in.Status = "failed"
 		in.Error = "audit unavailable; job will not be leased"
 		in.UpdatedAt = time.Now().UTC()
-		c.mu.Lock()
 		_ = save(path, &in)
-		c.mu.Unlock()
 		return nil, fmt.Errorf("job disabled because submit audit failed: %w", err)
+	}
+	in.Status = "queued"
+	in.UpdatedAt = time.Now().UTC()
+	if err := save(path, &in); err != nil {
+		return nil, fmt.Errorf("job was audited but queue activation persistence failed: %w", err)
 	}
 	return &in, nil
 }
