@@ -80,11 +80,11 @@ func (c *Coordinator) httpJobs(w http.ResponseWriter, r *http.Request) {
 		clusterWrite(w, v, err, http.StatusOK)
 		return
 	}
-	var in Job
+	var in AuthorizedJobRequest
 	if !clusterDecode(w, r, &in) {
 		return
 	}
-	v, err := c.Submit(in)
+	v, err := c.SubmitAuthorized(in.Job, in.AuthorityID, in.RequiredDataScopes, in.RequiredTool)
 	clusterWrite(w, v, err, http.StatusCreated)
 }
 
@@ -156,7 +156,7 @@ func (c *Coordinator) httpLease(w http.ResponseWriter, r *http.Request) {
 	if !clusterDecode(w, r, &in) {
 		return
 	}
-	lease, err := c.LeaseJob(worker, in.LeaseSeconds)
+	lease, err := c.LeaseJobAuthorized(worker, in.LeaseSeconds)
 	if errors.Is(err, os.ErrNotExist) {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -179,7 +179,7 @@ func (c *Coordinator) httpComplete(w http.ResponseWriter, r *http.Request) {
 	if !clusterDecode(w, r, &in) {
 		return
 	}
-	v, err := c.Complete(worker, in.JobID, in.LeaseToken, in.Result, in.Error)
+	v, err := c.CompleteAuthorized(worker, in.JobID, in.LeaseToken, in.Result, in.Error)
 	clusterWrite(w, v, err, http.StatusOK)
 }
 
