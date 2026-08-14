@@ -94,7 +94,7 @@ func Allows(scopes []string, requested string) bool {
 
 func (e Envelope) AllowsCapability(capability string) bool { return Allows(e.Capabilities, capability) }
 func (e Envelope) AllowsDataScope(scope string) bool       { return Allows(e.DataScopes, scope) }
-func (e Envelope) AllowsTool(tool string) bool              { return Allows(e.ToolScopes, tool) }
+func (e Envelope) AllowsTool(tool string) bool             { return Allows(e.ToolScopes, tool) }
 
 // Derive creates a strictly equal-or-narrower delegated envelope. It is the
 // only supported way to derive authority. A child cannot widen permissions,

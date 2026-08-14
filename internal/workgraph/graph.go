@@ -31,15 +31,15 @@ const (
 )
 
 const (
-	StatePending      State = "pending"
-	StateReady        State = "ready"
-	StateRunning      State = "running"
-	StateWaiting      State = "waiting"
-	StateApproval     State = "approval_required"
-	StateReconciling  State = "reconciling"
-	StateCompleted    State = "completed"
-	StateFailed       State = "failed"
-	StateCancelled    State = "cancelled"
+	StatePending     State = "pending"
+	StateReady       State = "ready"
+	StateRunning     State = "running"
+	StateWaiting     State = "waiting"
+	StateApproval    State = "approval_required"
+	StateReconciling State = "reconciling"
+	StateCompleted   State = "completed"
+	StateFailed      State = "failed"
+	StateCancelled   State = "cancelled"
 )
 
 const (
