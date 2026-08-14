@@ -14,17 +14,10 @@ jobs:
           persist-credentials: true
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
-          go-version: '1.26.5'
+          go-version: '1.26.6'
       - name: Format v1.3 Go sources
         run: |
-          gofmt -w \
-            cmd/kingagentd/main.go \
-            internal/agent/agent.go \
-            internal/platform/platform.go \
-            internal/platform/http.go \
-            internal/platform/platform_test.go \
-            internal/tool/extensions.go \
-            internal/tool/extensions_test.go
+          gofmt -w cmd/kingagentd/main.go internal/agent/agent.go internal/platform/*.go internal/tool/extensions*.go
           if git diff --quiet; then
             echo "Already formatted"
             exit 0
