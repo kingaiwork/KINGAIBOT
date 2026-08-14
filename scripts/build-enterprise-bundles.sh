@@ -2,6 +2,7 @@
 set -euo pipefail
 
 VERSION="${VERSION:-1.3.0}"
+VERSION="${VERSION#v}"
 MIN_GO_VERSION="${KINGAGENT_MIN_RELEASE_GO:-1.26.6}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${KINGAI_ENTERPRISE_DIST:-$ROOT/dist/enterprise}"
