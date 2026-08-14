@@ -208,12 +208,11 @@ func (c *Coordinator) ActivateHeld(jobID, controlRef string) (*Job, error) {
 		_ = save(jobPath, &original)
 		return nil, fmt.Errorf("held job activation rolled back because audit failed: %w", err)
 	}
+	// Hold-marker cleanup is bookkeeping only after queued state and activation
+	// audit are durable. Failure to delete it must never be reported as a failed
+	// activation because a Worker may now legitimately lease the queued job.
 	holdPath, _ := c.holdPath(jobID)
-	if err := os.Remove(holdPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		// The job is already safely queued and audited. A stale hold marker is a
-		// recoverable bookkeeping issue, not grounds to undo a leaseable job.
-		return nil, fmt.Errorf("job activated but stale hold marker could not be removed: %w", err)
-	}
+	_ = os.Remove(holdPath)
 	public := *job
 	public.LeaseTokenHash = ""
 	return &public, nil
@@ -278,10 +277,22 @@ func (c *Coordinator) HeldJobs() ([]*HeldJob, error) {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
+		holdPath := filepath.Join(c.holdsDir(), entry.Name())
 		var hold HeldJob
-		if read(filepath.Join(c.holdsDir(), entry.Name()), &hold) == nil {
-			out = append(out, &hold)
+		if read(holdPath, &hold) != nil {
+			continue
 		}
+		jobPath, pathErr := c.jobPath(hold.JobID)
+		if pathErr != nil {
+			continue
+		}
+		var job Job
+		if read(jobPath, &job) != nil || job.Status != "held" {
+			// Clean stale bookkeeping markers from already-activated/terminal jobs.
+			_ = os.Remove(holdPath)
+			continue
+		}
+		out = append(out, &hold)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
