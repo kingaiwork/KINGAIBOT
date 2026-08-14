@@ -19,6 +19,7 @@ const (
 	Queued          Status = "queued"
 	Running         Status = "running"
 	WaitingApproval Status = "waiting_approval"
+	Completing      Status = "completing"
 	Reconciliation  Status = "reconciliation"
 	Completed       Status = "completed"
 	Failed          Status = "failed"
@@ -178,7 +179,7 @@ func (s *Store) Recoverable() ([]*Task, error) {
 	}
 	out := []*Task{}
 	for _, t := range all {
-		if t.Status == Running || t.Status == Queued {
+		if t.Status == Running || t.Status == Completing || t.Status == Queued {
 			out = append(out, t)
 		}
 	}
@@ -189,6 +190,9 @@ func (s *Store) Cancel(id string) error {
 	_, err := s.Update(id, func(t *Task) error {
 		if t.Status == Completed || t.Status == Failed || t.Status == Canceled {
 			return errors.New("task already terminal")
+		}
+		if t.Status == Completing || t.Status == Reconciliation {
+			return errors.New("task has ambiguous side effects and requires reconciliation")
 		}
 		t.Status = Canceled
 		t.PendingApproval = ""
