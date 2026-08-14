@@ -22,6 +22,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/evolution"
 	"github.com/kingaiwork/KINGAIBOT/internal/knowledge"
 	"github.com/kingaiwork/KINGAIBOT/internal/memory"
+	"github.com/kingaiwork/KINGAIBOT/internal/orchestration"
 	"github.com/kingaiwork/KINGAIBOT/internal/platform"
 	"github.com/kingaiwork/KINGAIBOT/internal/policy"
 	"github.com/kingaiwork/KINGAIBOT/internal/provider"
@@ -94,6 +95,9 @@ func main() {
 
 	wgs, mustErr := workgraph.NewStore(filepath.Join(cfg.Runtime.DataDir, "workgraphs"), el)
 	must(mustErr)
+	orchestrator, mustErr := orchestration.New(filepath.Join(cfg.Runtime.DataDir, "orchestration"), wgs, cc, authorityStore, el)
+	must(mustErr)
+	defer orchestrator.Close()
 
 	must(rt.Recover())
 
@@ -151,13 +155,19 @@ func main() {
 	root.Handle("/v1/authority/envelopes", authorityAdmin)
 	root.Handle("/v1/authority/envelopes/", authorityAdmin)
 
+	// Orchestration performs the race-free handoff from a Ready/approved
+	// WorkGraph execute/delegate node to an authority-bound Cluster job. This
+	// surface is admin-only; the model cannot dispatch, approve or reconcile it.
+	orchestrationAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, orchestrator.Handler())
+	root.Handle("/v1/orchestration/", orchestrationAdmin)
+
 	// Channel-specific inbound authentication is enforced inside InboundHandler.
 	root.Handle("/v1/inbound/", pm.InboundHandler())
 	root.Handle("/", coreHandler)
 
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "enabled", "knowledge", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "enabled", "knowledge", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
