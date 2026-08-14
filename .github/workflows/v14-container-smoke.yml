@@ -1,0 +1,58 @@
+name: V1.4 Container Smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Build worker and console images
+        run: |
+          docker build -f deploy/docker/Dockerfile.worker -t kingaibot-worker:smoke .
+          docker build -f deploy/docker/Dockerfile.console -t kingaibot-console:smoke .
+      - name: Worker stays alive with writable sandbox
+        shell: bash
+        run: |
+          set +e
+          timeout 4 docker run --rm \
+            -e KINGAIBOT_WORKER_TOKEN=kaw_worker_test_testsecret012345678901234567890123 \
+            kingaibot-worker:smoke \
+            -server http://127.0.0.1:9 -workspace /data
+          code=$?
+          set -e
+          if [[ "$code" -ne 124 ]]; then
+            echo "Worker exited before timeout; expected it to stay alive while coordinator is unavailable. exit=$code" >&2
+            exit 1
+          fi
+      - name: Console serves static Control Center
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker rm -f kingconsole-smoke >/dev/null 2>&1 || true
+          docker run -d --name kingconsole-smoke -p 18889:18889 kingaibot-console:smoke
+          cleanup() { docker rm -f kingconsole-smoke >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          for attempt in 1 2 3 4 5; do
+            if curl -fsS http://127.0.0.1:18889/ui/ | grep -q 'KINGAIBOT Control Center'; then
+              exit 0
+            fi
+            if ! docker inspect -f '{{.State.Running}}' kingconsole-smoke 2>/dev/null | grep -qx true; then
+              echo "kingconsole exited before becoming ready" >&2
+              docker inspect kingconsole-smoke || true
+              docker logs kingconsole-smoke || true
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "kingconsole stayed running but did not become ready" >&2
+          docker inspect kingconsole-smoke || true
+          docker logs kingconsole-smoke || true
+          exit 1
