@@ -15,6 +15,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/agent"
 	"github.com/kingaiwork/KINGAIBOT/internal/api"
 	"github.com/kingaiwork/KINGAIBOT/internal/approval"
+	"github.com/kingaiwork/KINGAIBOT/internal/cluster"
 	"github.com/kingaiwork/KINGAIBOT/internal/config"
 	"github.com/kingaiwork/KINGAIBOT/internal/eventlog"
 	"github.com/kingaiwork/KINGAIBOT/internal/evolution"
@@ -70,6 +71,10 @@ func main() {
 	must(mustErr)
 	tr.RegisterExtension(ks)
 
+	cc, mustErr := cluster.New(filepath.Join(cfg.Runtime.DataDir, "cluster"), el)
+	must(mustErr)
+	tr.RegisterExtension(cc)
+
 	must(rt.Recover())
 
 	coreHandler := api.New(cfg, rt, tr).Handler()
@@ -95,13 +100,22 @@ func main() {
 	root.Handle("GET /v1/knowledge/", knowledgeRead)
 	root.Handle("POST /v1/knowledge/", knowledgeAdmin)
 
+	// Cluster administration is privileged. Workers never receive admin tokens;
+	// they authenticate with one-time-issued worker credentials on a separate API.
+	clusterAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, cc.AdminHandler())
+	root.Handle("/v1/cluster/workers", clusterAdmin)
+	root.Handle("/v1/cluster/workers/", clusterAdmin)
+	root.Handle("/v1/cluster/jobs", clusterAdmin)
+	root.Handle("/v1/cluster/jobs/", clusterAdmin)
+	root.Handle("/v1/cluster/worker/", cc.WorkerHandler())
+
 	// Channel-specific inbound authentication is enforced inside InboundHandler.
 	root.Handle("/v1/inbound/", pm.InboundHandler())
 	root.Handle("/", coreHandler)
 
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "enabled", "knowledge", "enabled")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "enabled", "knowledge", "enabled", "cluster", "enabled")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
