@@ -32,7 +32,7 @@ func approvalStageV14(decision string) string {
 
 // DecideApprovalV14 makes approval trust directional and crash-safe:
 //
-//   pending -> approving/denying -> audit -> approved/denied -> task transition
+//	pending -> approving/denying -> audit -> approved/denied -> task transition
 //
 // The staged states are intentionally non-executable. If the process or audit
 // subsystem fails, the task remains WaitingApproval and the same decision can
@@ -82,10 +82,10 @@ func (r *Runtime) DecideApprovalV14(id, decision string) error {
 	}
 
 	if err := r.events.Append(eventlog.Event{Type: "approval." + decision, TaskID: a.TaskID, Data: map[string]any{
-		"approval_id":   a.ID,
-		"tool":          a.Tool,
+		"approval_id":    a.ID,
+		"tool":           a.Tool,
 		"arguments_hash": a.ArgumentsHash,
-		"staged_from":   stage,
+		"staged_from":    stage,
 	}}); err != nil {
 		return fmt.Errorf("approval remains %s because decision audit failed: %w", stage, err)
 	}
