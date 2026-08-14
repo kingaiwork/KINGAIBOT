@@ -14,7 +14,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: '1.26.5'
+          go-version: '1.26.6'
           cache: true
       - name: Format check
         run: test -z "$(gofmt -l .)"
@@ -29,7 +29,16 @@ jobs:
       - name: Shell syntax
         run: for f in scripts/*.sh; do bash -n "$f"; done
       - name: Release guard requires production Go
-        run: KINGAGENT_MIN_RELEASE_GO=1.26.5 VERSION=ci SOURCE_DATE_EPOCH=315532800 ./scripts/build-release.sh
+        run: KINGAGENT_MIN_RELEASE_GO=1.26.6 VERSION=ci SOURCE_DATE_EPOCH=315532800 ./scripts/build-release.sh
+      - name: Build licensed enterprise bundles
+        run: |
+          KINGAGENT_MIN_RELEASE_GO=1.26.6 VERSION=ci bash ./scripts/build-enterprise-bundles.sh
+          test -s dist/enterprise/kingai-enterprise-linux-amd64.zip
+          test -s dist/enterprise/kingai-enterprise-linux-arm64.zip
+          test -s dist/enterprise/kingai-enterprise-windows-amd64.zip
+          test -s dist/enterprise/kingai-enterprise-darwin-arm64.zip
+          test -s dist/enterprise/kingai-enterprise-darwin-amd64.zip
+          (cd dist/enterprise && sha256sum -c SHA256SUMS)
 
   macos-native:
     runs-on: macos-latest
@@ -39,7 +48,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: '1.26.5'
+          go-version: '1.26.6'
           cache: true
       - name: Native test and build
         run: |
@@ -56,7 +65,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: '1.26.5'
+          go-version: '1.26.6'
           cache: true
       - name: Native test and build
         shell: pwsh

@@ -1,8 +1,8 @@
-FROM golang:1.26.5-trixie AS build
+FROM golang:1.26.6-trixie AS build
 WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 go test ./... && \
-    CGO_ENABLED=0 go build -trimpath -ldflags='-s -w -X main.version=1.1.0' -o /out/kingagentd ./cmd/kingagentd && \
+    CGO_ENABLED=0 go build -trimpath -ldflags='-s -w -X main.version=1.3.0' -o /out/kingagentd ./cmd/kingagentd && \
     CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/kingagent ./cmd/kingagent
 
 FROM gcr.io/distroless/static-debian13:nonroot

@@ -1,68 +1,81 @@
 # KINGAIBOT
 
-**A future-facing, secure, durable and extensible intelligent-agent execution system from [kingai.work](https://kingai.work).**
+**A secure, durable and extensible intelligent-agent execution system from [kingai.work](https://kingai.work).**
 
 Official website: **https://kingai.work**  
 Contact: **vip@kingai.work**
 
-> KINGAIBOT is a long-term R&D project of kingai.work. It is being developed as the future **terminal execution layer of the existing KING AI intelligent-lifeform system**. KINGAIBOT is developed and validated as an independent system today, while its long-term destination is controlled integration into the KING AI main system.
+> KINGAIBOT is the controlled execution layer for the KING AI intelligent-lifeform system. In v1.3 it also acts as the customer-local private runtime for **KING AI Enterprise Workforce OS**, so enterprise digital employees can receive approved business tasks without turning the cloud control plane into a privileged remote shell.
 
 ## English
 
-### Project Positioning
-
-KINGAIBOT is not a rename of the existing KING AI intelligent-lifeform system and it does not replace the current main system. It is a separate execution-oriented agent runtime designed to become the trusted terminal execution layer for KING AI.
-
-Its responsibility is to turn high-level intelligence into controlled real-world digital execution across devices, APIs, tools, workflows, services and cooperating agents.
-
-Long-term architecture:
+### Product role
 
 ```text
-KING AI Intelligent Lifeform
-        ↓
-Reasoning / Memory / Governance / Mission Intelligence
-        ↓
-Controlled Integration Boundary
-        ↓
-KINGAIBOT Execution Layer
-        ↓
-Devices / APIs / Tools / MCP / A2A / Workflows / Services
+KING AI / Enterprise Workforce control plane
+Accounts / Billing / License / Organization / Digital Employees
+                 ↓
+      Governed task + policy boundary
+                 ↓
+KINGAIBOT customer-local execution layer
+Durable tasks / local approvals / tool policy / audit / MCP / A2A
+                 ↓
+Customer files / APIs / CRM / ERP / browsers / approved tools
 ```
 
-### Current v1.2.0 Foundation
+KINGAIBOT converts high-level goals into controlled digital execution. The model is replaceable; local policy remains authoritative.
 
-- Cross-platform Go runtime for Linux, macOS and Windows
-- Go 1.26.5 production source/release baseline
+### Current v1.3 foundation
+
+- Linux / macOS / Windows cross-platform Go runtime
+- **Go 1.26.6** production source, CI, container and release security baseline
 - API-key-based model providers with model-vendor independence
 - Durable task persistence and restart recovery
 - Approval-aware tool execution with `allow / ask / deny`
 - Exact approvals bound to task + tool + canonical argument hash
 - Go `os.Root` traversal-resistant filesystem sandbox
-- Safe file capabilities: read, stat, list, atomic write, mkdir and single-item delete
-- No agent-exposed recursive delete in V1.2
-- HTTPS tool with allowlist, SSRF/DNS-rebinding protection and redirect downgrade prevention
-- Authenticated Provider / MCP / A2A requests do not automatically follow redirects
+- Safe file read/stat/list/atomic-write/mkdir/single-delete capabilities
+- HTTPS tooling with target allowlists, SSRF/DNS-rebinding defenses and redirect downgrade prevention
+- Authenticated Provider / MCP / A2A / Enterprise Workforce requests do not automatically follow redirects
 - Shell disabled by default and restricted to explicit bare executable allowlists when enabled
 - Separate Admin / MCP / A2A identities
-- MCP server and remote MCP bridge
-- A2A Agent Card and remote agent bridge
+- MCP server + remote MCP bridge
+- A2A Agent Card + remote agent bridge
 - Hash-chained audit/event log with integrity verification
-- Controlled evolution proposals rather than uncontrolled self-modification
+- Controlled evolution proposals instead of uncontrolled self-modification
 - Safe update pipeline with checksums, signature policy, health verification and rollback
 - GitHub CI, CodeQL, govulncheck, race tests, SBOM, provenance and Sigstore-oriented release flow
+- Optional **KING AI Enterprise Workforce private-node bridge**
 
-### Design Principles
+### Enterprise Workforce private runtime
+
+When `KINGAI_WORKFORCE_NODE_TOKEN` is present, `kingagentd` automatically becomes a private digital-employee node:
+
+1. Heartbeat to the KING AI control plane.
+2. Sync active digital-employee and workflow policy.
+3. Pull only cloud tasks that have passed cloud-side governance.
+4. Convert each cloud task into a normal local durable KINGAIBOT task.
+5. Re-apply local tool policy, sandbox and local approval requirements.
+6. Execute permitted work through the normal agent runtime.
+7. Report terminal status back to the control plane.
+
+Cloud policy **cannot** grant arbitrary shell permission and **cannot** bypass local approval. Cloud employee skill lists describe business intent; they do not grant local operating-system capabilities.
+
+By default, local AI output is **not uploaded** to the cloud. Set `KINGAI_WORKFORCE_REPORT_OUTPUT=true` only when the enterprise data policy explicitly permits bounded result reporting.
+
+### Design principles
 
 1. **Model-independent** — models are replaceable reasoning resources, not the operating system.
-2. **Execution is policy-controlled** — intelligence never automatically implies unrestricted privilege.
+2. **Local execution policy wins** — cloud intent never implies unrestricted privilege.
 3. **Fail closed for dangerous operations** — missing audit, invalid approval or integrity failure blocks side effects.
-4. **Durability before autonomy** — work must survive restart and ambiguous actions must not be blindly replayed.
-5. **Learning without uncontrolled self-modification** — evolution is proposed, tested, reviewed, staged and reversible.
-6. **Open interoperability** — MCP, A2A and future standards are integration layers, not vendor lock-in.
-7. **Long-term convergence with KING AI** — independent development now, controlled integration into the main intelligent-lifeform system later.
+4. **Durability before autonomy** — work survives restart and ambiguous actions are not blindly replayed.
+5. **Private by default** — customer credentials, files, memory and normal task output stay on the customer runtime unless an approved integration requires transmission.
+6. **Learning without uncontrolled self-modification** — evolution is proposed, tested, reviewed, staged and reversible.
+7. **Open interoperability** — MCP, A2A and future standards are integration layers rather than vendor lock-in.
 
 ### Documentation
 
+- [Enterprise Workforce Private Node](docs/ENTERPRISE-WORKFORCE-NODE.md)
 - [Documentation Index](docs/README.md)
 - [Product Definition](docs/PRODUCT.md)
 - [User & Operations Guide](docs/USAGE.md)
@@ -78,7 +91,7 @@ Devices / APIs / Tools / MCP / A2A / Workflows / Services
 - [Residual Risks](docs/RESIDUAL-RISKS.md)
 - [Support](docs/SUPPORT.md)
 
-### Quick Start
+### Standalone quick start
 
 ```bash
 cp configs/config.example.json config.json
@@ -96,14 +109,22 @@ export KINGAGENT_ADMIN_TOKEN="...same admin token..."
 go run ./cmd/kingagent run "Create hello.txt in the workspace with a short greeting"
 ```
 
-If a requested tool is configured as `ask`, review and approve it explicitly:
+For a private Enterprise Workforce node, additionally set the one-time node token issued in the KING AI Enterprise console:
+
+```bash
+export KINGAI_WORKFORCE_NODE_TOKEN='knode_...'
+export KINGAI_WORKFORCE_URL='https://api.kingai.work'
+go run ./cmd/kingagentd -config ./config.json
+```
+
+If a requested local tool is configured as `ask`, the normal local approval flow still applies:
 
 ```bash
 go run ./cmd/kingagent approvals
 go run ./cmd/kingagent approve appr_xxx
 ```
 
-### Installation Repository
+### Installation repository
 
 Repository: **kingaiwork/KINGAIBOT**
 
@@ -125,7 +146,7 @@ Windows PowerShell bootstrap:
 $env:KINGAGENT_REPO='kingaiwork/KINGAIBOT'; $env:KINGAGENT_REQUIRE_SIGNATURE='1'; irm https://raw.githubusercontent.com/kingaiwork/KINGAIBOT/main/scripts/install.ps1 | iex
 ```
 
-For commercial production, prefer a reviewed immutable release/tag rather than installing directly from a moving `main` branch.
+For commercial production, use a reviewed immutable release/tag rather than a moving `main` branch.
 
 ---
 
@@ -133,66 +154,70 @@ For commercial production, prefer a reviewed immutable release/tag rather than i
 
 ## 项目定位
 
-**KINGAIBOT 是 kingai.work 面向未来长期开发的智能体执行系统。**
+**KINGAIBOT 是 KING AI 的安全终端执行层，也是 KING AI Enterprise Workforce OS 的企业私有数字员工运行节点。**
 
-它不是现有 KING AI 智慧生命体系统的简单改名，也不是用来替代现有主系统。KINGAIBOT 将作为独立系统持续研发、测试、部署和演进，长期目标是成为 **KING AI 智慧生命体的终端执行层（Execution Layer）**。
-
-它负责把 KING AI 上层的目标、任务、推理和治理要求，转化为对设备、API、工具、工作流、服务和其他智能体的安全、可控、可审计执行。
-
-长期结构：
+它负责把 KING AI 上层的目标、任务和治理要求，转化为对设备、API、文件、工具、工作流、MCP、A2A 与企业系统的安全、可控、可审计执行。
 
 ```text
-KING AI 智慧生命体
-        ↓
-推理 / 记忆 / 治理 / Mission 智慧
-        ↓
-受控整合边界
-        ↓
-KINGAIBOT 终端执行层
-        ↓
-设备 / API / 工具 / MCP / A2A / 工作流 / 服务
+KING AI / 企业数字员工云端控制面
+账号 / 购买 / License / 企业 / 数字员工 / 审批
+                 ↓
+          受控任务与策略边界
+                 ↓
+KINGAIBOT 企业本地私有运行层
+持久任务 / 本地审批 / 工具权限 / 审计 / MCP / A2A
+                 ↓
+企业文件 / CRM / ERP / API / 浏览器 / 已批准工具
 ```
 
-### 当前 v1.2.0 基础能力
+### 当前 v1.3 核心能力
 
 - Linux / macOS / Windows 跨平台 Go Runtime
-- Go 1.26.5 生产源码与正式 Release 基线
+- **Go 1.26.6** 生产源码、CI、Docker 与正式 Release 安全基线
 - 基于 API Key 的多模型 Provider，模型厂商可替换
 - Durable Task 持久任务与重启恢复
-- `allow / ask / deny` 权限与审批机制
-- 审批精确绑定“任务 + 工具 + 规范化参数哈希”
+- `allow / ask / deny` 本地权限与审批机制
+- 审批绑定“任务 + 工具 + 规范化参数哈希”
 - 基于 Go `os.Root` 的抗路径穿越文件系统沙箱
-- 安全文件能力：读取、元数据、目录列表、原子写入、建目录、单项删除
-- V1.2 不向智能体暴露递归删除
-- HTTPS 工具、目标白名单、SSRF/DNS Rebinding 防护与重定向降级阻断
-- Provider / MCP / A2A 鉴权请求不自动跟随重定向
-- Shell 默认关闭；启用时只允许管理员显式配置的裸命令名
-- Admin / MCP / A2A 三套独立身份
-- MCP Server 与远程 MCP Bridge
-- A2A Agent Card 与远程 Agent Bridge
-- SHA-256 前向哈希链审计日志与完整性验证
-- 受控自进化提案机制，而不是生产代码无限自修改
-- 校验、签名策略、健康检查和回滚式安全升级
-- GitHub CI、CodeQL、govulncheck、Race、SBOM、构建溯源和 Sigstore 发布链
+- HTTPS 目标白名单、SSRF/DNS Rebinding 与重定向防护
+- Shell 默认关闭；启用时也只能使用管理员明确配置的命令
+- Admin / MCP / A2A 独立身份
+- MCP Server / MCP Bridge / A2A Bridge
+- SHA-256 前向哈希链审计日志
+- 受控自进化提案，而不是生产环境无限自修改
+- 校验、签名、健康检查与回滚式安全升级
+- GitHub CI、CodeQL、govulncheck、Race、SBOM、构建溯源、Sigstore 发布链
+- **企业数字员工私有节点桥接能力**
 
-### 长期开发原则
+### 企业数字员工自动运行
 
-1. **模型不是系统本身**：任何模型都可以替换。
-2. **越智能不等于越高权限**：执行必须受策略控制。
-3. **危险操作 Fail-Closed**：审计、审批、完整性异常时阻止副作用。
+企业在 `kingai.work` 创建数字员工并注册私有节点后，只需在客户机器保存一次性节点令牌和 AI Provider API Key。`kingagentd` 启动后会自动：
+
+1. 上报节点健康状态；
+2. 同步企业数字员工政策；
+3. 拉取已经通过云端治理的任务；
+4. 将任务转换成普通 KINGAIBOT 本地持久任务；
+5. 再次执行本地 `allow / ask / deny`、沙箱和审批；
+6. 通过已批准工具完成业务；
+7. 向云端回传终态。
+
+**云端永远不能绕过本地审批，也不能给自己获得任意 Shell 权限。**
+
+默认 `KINGAI_WORKFORCE_REPORT_OUTPUT=false`：云端只获取任务成功/失败等运营状态，不上传本地 AI 完整输出。只有企业明确允许时才开启受长度限制的结果回传。
+
+### 开发原则
+
+1. **模型不是系统本身**：可以随时替换模型。
+2. **本地安全策略优先**：云端任务不等于系统权限。
+3. **危险操作 Fail-Closed**：审批、审计或完整性异常时阻止副作用。
 4. **先保证持久可靠，再扩大自治范围**。
-5. **允许学习和进化，但不允许不可控自我修改**。
-6. **持续融合开放标准**：MCP、A2A、WASM/WASI 与未来智能体协议。
-7. **最终与 KING AI 主系统融合**：当前独立演进，成熟后通过受控接口成为主系统终端执行层。
-
-### 官方信息
-
-官网：**https://kingai.work**  
-邮箱：**vip@kingai.work**  
-GitHub：**kingaiwork/KINGAIBOT**
+5. **企业数据默认留在企业私有环境**。
+6. **允许学习和进化，但不允许不可控自我修改**。
+7. **持续融合 MCP、A2A 与未来开放智能体协议**。
 
 ### 文档
 
+- [企业数字员工私有运行节点](docs/ENTERPRISE-WORKFORCE-NODE.md)
 - [文档总入口](docs/README.md)
 - [产品定义](docs/PRODUCT.md)
 - [使用与运维手册](docs/USAGE.md)
@@ -208,4 +233,8 @@ GitHub：**kingaiwork/KINGAIBOT**
 - [剩余风险](docs/RESIDUAL-RISKS.md)
 - [支持](docs/SUPPORT.md)
 
-> KINGAIBOT 是长期工程。仓库中的版本代表当前经过验证的阶段能力，而不是“永远终极”或“绝对零 Bug”的声明。所有高权限能力都应遵循最小权限、可审计、可回滚和人工接管原则。
+官网：**https://kingai.work**  
+邮箱：**vip@kingai.work**  
+GitHub：**kingaiwork/KINGAIBOT**
+
+> KINGAIBOT 是长期工程。所有高权限能力持续遵循最小权限、可审计、可回滚和人工接管原则。
