@@ -439,6 +439,7 @@ func (g *Graph) validateAcyclic() error {
 			if err := visit(id); err != nil {
 				return err
 			}
+		}
 	}
 	return nil
 }
