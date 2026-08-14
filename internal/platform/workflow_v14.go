@@ -21,9 +21,6 @@ func workflowStepIdempotencyKey(runID string, stepIndex int, stepID string) stri
 	return fmt.Sprintf("king-workflow:%s:step:%d:%s", runID, stepIndex, stepID)
 }
 
-// RunWorkflowV14 starts a workflow whose individual Runtime tasks have stable
-// identities. Recovery can therefore reattach to an already-created step Task
-// instead of blindly creating a duplicate after a crash window.
 func (m *Manager) RunWorkflowV14(id string) (*WorkflowRun, error) {
 	if _, ok := m.rt.(idempotentPlatformRuntime); !ok {
 		return nil, errors.New("platform runtime does not support idempotent workflow tasks")
@@ -63,8 +60,6 @@ func (m *Manager) RunWorkflowV14(id string) (*WorkflowRun, error) {
 	return run, nil
 }
 
-// RecoverWorkflowRunsV14 may be called repeatedly. runMu guarantees that a run
-// already advancing in this process is not started a second time.
 func (m *Manager) RecoverWorkflowRunsV14() {
 	runs, err := m.WorkflowRuns()
 	if err != nil {
@@ -108,8 +103,6 @@ func (m *Manager) workflowReconciliationV14(run *WorkflowRun, reason string) {
 	run.Status = "reconciliation"
 	run.Error = memory.SanitizeContent(reason)
 	run.UpdatedAt = now()
-	// Reconciliation is a fail-closed transition. Persist the safer state first;
-	// audit failure must never put the run back into an executable state.
 	if err := m.saveWorkflowRun(run); err != nil {
 		return
 	}
@@ -223,8 +216,6 @@ func (m *Manager) advanceWorkflowV14(runID string) {
 				run.TaskIDs = append(run.TaskIDs, created.ID)
 			}
 			if err := m.saveWorkflowRun(run); err != nil {
-				// The Task has a stable idempotency key. Recovery can call
-				// CreateIdempotent again and recover the exact same Task.
 				return
 			}
 		}
@@ -255,10 +246,10 @@ func (m *Manager) advanceWorkflowV14(runID string) {
 		case task.Failed, task.Canceled:
 			m.workflowFailV14(run, current.Error)
 			return
-		case task.PendingAudit:
-			m.workflowReconciliationV14(run, "workflow task remains pending audit")
+		case task.PendingAudit, task.Reconciliation:
+			m.workflowReconciliationV14(run, fmt.Sprintf("workflow task %s is %s", current.ID, current.Status))
 			return
-		case task.Queued, task.Running, task.WaitingApproval:
+		case task.Queued, task.Running, task.WaitingApproval, task.Completing:
 			select {
 			case <-m.ctx.Done():
 				return
