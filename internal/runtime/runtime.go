@@ -334,29 +334,53 @@ func (r *Runtime) DecideApproval(id, status string) error {
 		return err
 	}
 	if err := r.events.Append(eventlog.Event{Type: "approval." + status, TaskID: a.TaskID, Data: map[string]any{"approval_id": a.ID, "tool": a.Tool, "arguments_hash": a.ArgumentsHash}}); err != nil {
-		return fmt.Errorf("approval state persisted but audit append failed; execution remains blocked: %w", err)
+		_, rollbackErr := r.approvals.Update(id, func(cur *approval.Approval) error {
+			if cur.Status == status && cur.ExecutionState == "" {
+				cur.Status = "pending"
+			}
+			return nil
+		})
+		if rollbackErr != nil {
+			return fmt.Errorf("approval audit failed and approval rollback also failed; manual reconciliation required: audit=%v rollback=%w", err, rollbackErr)
+		}
+		return fmt.Errorf("approval decision rolled back because audit append failed: %w", err)
 	}
-	if status == "approved" {
-		_, err = r.tasks.Update(a.TaskID, func(t *task.Task) error {
+
+	if status == "denied" {
+		_, taskErr := r.tasks.Update(a.TaskID, func(t *task.Task) error {
+			if t.Status == task.Canceled || t.Status == task.Completed || t.Status == task.Failed {
+				return nil
+			}
 			if t.Status != task.WaitingApproval || t.PendingApproval != a.ID {
 				return errors.New("task is not waiting for this approval")
 			}
-			t.Status = task.Queued
+			t.Status = task.Failed
 			t.PendingApproval = ""
-			t.Error = ""
+			t.Error = "approval denied"
 			return nil
 		})
-		if err != nil {
-			return err
+		return taskErr
+	}
+
+	_, err = r.tasks.Update(a.TaskID, func(t *task.Task) error {
+		if t.Status != task.WaitingApproval || t.PendingApproval != a.ID {
+			return errors.New("task is not waiting for this approval")
 		}
-		if !r.enqueue(a.TaskID) {
-			_, _ = r.tasks.Update(a.TaskID, func(t *task.Task) error {
-				t.Status = task.Failed
-				t.Error = "runtime queue unavailable after approval"
-				return nil
-			})
-			return ErrQueueUnavailable
-		}
+		t.Status = task.Queued
+		t.PendingApproval = ""
+		t.Error = ""
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if !r.enqueue(a.TaskID) {
+		_, _ = r.tasks.Update(a.TaskID, func(t *task.Task) error {
+			t.Status = task.Failed
+			t.Error = "runtime queue unavailable after approval"
+			return nil
+		})
+		return ErrQueueUnavailable
 	}
 	return nil
 }
