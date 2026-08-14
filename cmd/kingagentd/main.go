@@ -24,9 +24,10 @@ import (
 	karuntime "github.com/kingaiwork/KINGAIBOT/internal/runtime"
 	"github.com/kingaiwork/KINGAIBOT/internal/task"
 	"github.com/kingaiwork/KINGAIBOT/internal/tool"
+	"github.com/kingaiwork/KINGAIBOT/internal/workforce"
 )
 
-var version = "1.2.0"
+var version = "1.3.0"
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "configuration file")
@@ -59,6 +60,18 @@ func main() {
 	rt := karuntime.New(ts, as, el, ms, ae, es, cfg)
 	defer rt.Close()
 	must(rt.Recover())
+
+	workforceCtx, workforceCancel := context.WithCancel(context.Background())
+	defer workforceCancel()
+	workforceSettings, err := workforce.SettingsFromEnv()
+	must(err)
+	if workforceSettings.Enabled {
+		bridge, bridgeErr := workforce.NewBridge(workforceSettings, version, cfg.Runtime.DataDir, rt)
+		must(bridgeErr)
+		go bridge.Run(workforceCtx)
+		slog.Info("enterprise workforce bridge enabled", "control_plane", workforceSettings.ControlPlaneURL, "report_output", workforceSettings.ReportOutput)
+	}
+
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: api.New(cfg, rt, tr).Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
 		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version)
@@ -71,6 +84,7 @@ func main() {
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	<-ch
 	slog.Info("shutting down")
+	workforceCancel()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
