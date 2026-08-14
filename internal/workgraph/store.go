@@ -279,6 +279,42 @@ func (s *Store) Start(id, nodeID string) (*Graph, error) {
 	})
 }
 
+func (s *Store) AbortUnleased(id, nodeID, reason string) (*Graph, error) {
+	return s.transition(id, "workgraph.node.dispatch_aborted", func(g *Graph) (map[string]any, error) {
+		if err := g.AbortUnleasedStart(nodeID, reason, time.Now().UTC()); err != nil {
+			return nil, err
+		}
+		return map[string]any{"node_id": nodeID, "reason": boundedReason(reason)}, nil
+	})
+}
+
+func (s *Store) RequireReconciliation(id, nodeID, reason string) (*Graph, error) {
+	return s.transition(id, "workgraph.node.reconciliation_required", func(g *Graph) (map[string]any, error) {
+		if err := g.RequireReconciliation(nodeID, reason, time.Now().UTC()); err != nil {
+			return nil, err
+		}
+		return map[string]any{"node_id": nodeID, "reason": boundedReason(reason)}, nil
+	})
+}
+
+func (s *Store) ResumeReconciliation(id, nodeID string) (*Graph, error) {
+	return s.transition(id, "workgraph.node.reconciliation_resumed", func(g *Graph) (map[string]any, error) {
+		if err := g.ResumeReconciliation(nodeID, time.Now().UTC()); err != nil {
+			return nil, err
+		}
+		return map[string]any{"node_id": nodeID}, nil
+	})
+}
+
+func (s *Store) Fail(id, nodeID, reason string) (*Graph, error) {
+	return s.transition(id, "workgraph.node.failed", func(g *Graph) (map[string]any, error) {
+		if err := g.Fail(nodeID, reason, time.Now().UTC()); err != nil {
+			return nil, err
+		}
+		return map[string]any{"node_id": nodeID, "reason": boundedReason(reason)}, nil
+	})
+}
+
 func (s *Store) Complete(id, nodeID string, outputs map[string]any, evidence []Evidence) (*Graph, error) {
 	return s.transition(id, "workgraph.node.completed", func(g *Graph) (map[string]any, error) {
 		if err := g.Complete(nodeID, outputs, evidence, time.Now().UTC()); err != nil {
