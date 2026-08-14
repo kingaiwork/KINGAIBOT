@@ -32,7 +32,7 @@ jobs:
         run: KINGAGENT_MIN_RELEASE_GO=1.26.6 VERSION=ci SOURCE_DATE_EPOCH=315532800 ./scripts/build-release.sh
       - name: Build licensed enterprise bundles
         run: |
-          KINGAGENT_MIN_RELEASE_GO=1.26.6 VERSION=ci ./scripts/build-enterprise-bundles.sh
+          KINGAGENT_MIN_RELEASE_GO=1.26.6 VERSION=ci bash ./scripts/build-enterprise-bundles.sh
           test -s dist/enterprise/kingai-enterprise-linux-amd64.zip
           test -s dist/enterprise/kingai-enterprise-linux-arm64.zip
           test -s dist/enterprise/kingai-enterprise-windows-amd64.zip
