@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${VERSION:-${GITHUB_REF_NAME:-1.3.0}}"
+VERSION="${VERSION:-${GITHUB_REF_NAME:-1.4.0}}"
 VERSION="${VERSION#v}"
 MIN_GO_VERSION="${KINGAGENT_MIN_RELEASE_GO:-1.26.6}"
 GO_VERSION="$(go env GOVERSION)"
