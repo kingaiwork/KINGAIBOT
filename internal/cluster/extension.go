@@ -30,8 +30,8 @@ type jobSummary struct {
 func (c *Coordinator) ToolDefinitions() []provider.ToolDef {
 	return []provider.ToolDef{
 		{Type: "function", Function: provider.FunctionDef{Name: "cluster_workers_list", Description: "List registered remote workers and their declared capabilities. Worker secrets and metadata are never returned to the model.", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}}},
-		{Type: "function", Function: provider.FunctionDef{Name: "cluster_job_submit", Description: "Submit a durable capability-matched job to the remote worker queue. replay_policy defaults to manual; use safe only for operations known to be idempotent and replay-safe.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"kind": map[string]any{"type": "string"}, "payload": map[string]any{}, "required_capabilities": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "priority": map[string]any{"type": "integer"}, "replay_policy": map[string]any{"type": "string", "enum": []string{"manual", "safe"}}}, "required": []string{"kind"}}}},
-		{Type: "function", Function: provider.FunctionDef{Name: "cluster_jobs_list", Description: "List remote job lifecycle summaries without exposing raw payloads, lease tokens or result data", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}}},
+		{Type: "function", Function: provider.FunctionDef{Name: "cluster_job_submit", Description: "Request a durable remote-worker job. In authority-enforced deployments, direct model submission is denied unless trusted runtime context binds an authority envelope; the model cannot choose or elevate its own authority.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"kind": map[string]any{"type": "string"}, "payload": map[string]any{}, "required_capabilities": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "priority": map[string]any{"type": "integer"}, "replay_policy": map[string]any{"type": "string", "enum": []string{"manual", "safe"}}}, "required": []string{"kind"}}}},
+		{Type: "function", Function: provider.FunctionDef{Name: "cluster_jobs_list", Description: "List remote job lifecycle summaries without exposing raw payloads, lease tokens, result data or authority identifiers", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}}},
 	}
 }
 
@@ -70,7 +70,7 @@ func (c *Coordinator) ExecuteTool(_ context.Context, _ string, name string, raw 
 		if er := json.Unmarshal(raw, &in); er != nil {
 			return "", er
 		}
-		v, err = c.Submit(Job{Kind: in.Kind, Payload: in.Payload, RequiredCapabilities: in.RequiredCapabilities, Priority: in.Priority, ReplayPolicy: in.ReplayPolicy})
+		v, err = c.SubmitAuthorized(Job{Kind: in.Kind, Payload: in.Payload, RequiredCapabilities: in.RequiredCapabilities, Priority: in.Priority, ReplayPolicy: in.ReplayPolicy}, "", nil, "")
 	default:
 		return "", errors.New("unknown cluster tool")
 	}
