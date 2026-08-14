@@ -93,6 +93,9 @@ func main() {
 	cc, mustErr := cluster.New(filepath.Join(cfg.Runtime.DataDir, "cluster"), el)
 	must(mustErr)
 	must(cc.SetAuthorityChecker(authorityStore))
+	must(mustErr)
+	taskAuthorityResolver, mustErr = authority.NewTaskAuthorityResolver(ts)
+	must(mustErr)
 	must(cc.SetTaskAuthorityResolver(taskAuthorityResolver))
 	tr.RegisterExtension(cc)
 
@@ -113,8 +116,8 @@ func main() {
 
 	// Scoped platform API: legacy admin secret remains accepted, while durable
 	// access keys are evaluated against the path-level read/write/automation/admin
-	// permission boundary before reaching the safe control-plane handler.
-	platformScoped := pm.GovernedScopedAuthHandler(cfg.Server.AdminTokenEnv, pm.Handler())
+	// permission boundary before reaching the v1.4 control-plane handler.
+	platformScoped := pm.GovernedScopedAuthHandler(cfg.Server.AdminTokenEnv, pm.HandlerV14())
 	identityAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, pm.IdentityHandler())
 	inboundAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, pm.InboundAdminHandler())
 	statusScoped := pm.ScopedAuthHandler(cfg.Server.AdminTokenEnv, pm.StatusHandler())
@@ -175,14 +178,14 @@ func main() {
 	orchestrationAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, orchestrator.Handler())
 	root.Handle("/v1/orchestration/", orchestrationAdmin)
 
-	// Channel-specific inbound authentication and conservative retry semantics
-	// are enforced inside the crash-safe inbound gateway.
-	root.Handle("/v1/inbound/", pm.InboundHandlerSafe())
+	// Channel-specific inbound authentication, durable Session submission and
+	// conservative retry/reconciliation semantics are enforced in the v1.4 gateway.
+	root.Handle("/v1/inbound/", pm.InboundHandlerV14())
 	root.Handle("/", coreHandler)
 
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "safe", "knowledge", "safe", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "v1.4-safe", "knowledge", "safe", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
