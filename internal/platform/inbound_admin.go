@@ -4,11 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/kingaiwork/KINGAIBOT/internal/memory"
 )
 
 // InboundAdminHandler exposes reconciliation-only administration for durable
@@ -80,12 +81,9 @@ func taskMetadataString(metadata map[string]any, key string) string {
 // fail-closed terminal decision and never cancels or rewrites an existing Task.
 func (m *Manager) ReconcileInboundReceipt(id, decision, taskID, note string) (*InboundReceipt, error) {
 	decision = strings.ToLower(strings.TrimSpace(decision))
-	note = strings.TrimSpace(note)
+	note = clean(memory.SanitizeContent(note), 4096)
 	if note == "" {
 		return nil, errors.New("reconciliation note required")
-	}
-	if len(note) > 4096 {
-		return nil, errors.New("reconciliation note exceeds limit")
 	}
 	if decision != "link_task" && decision != "mark_failed" {
 		return nil, errors.New("decision must be link_task or mark_failed")
@@ -109,20 +107,21 @@ func (m *Manager) ReconcileInboundReceipt(id, decision, taskID, note string) (*I
 			return nil, err
 		}
 		if err := m.audit("channel.inbound.reconciled.failed", map[string]any{
-			"receipt_id": id,
-			"channel_id": receipt.ChannelID,
+			"receipt_id":       id,
+			"channel_id":       receipt.ChannelID,
 			"sender_sha256_96": senderDigest(receipt.Sender),
-			"note": note,
+			"note":             note,
 		}); err != nil {
 			return nil, fmt.Errorf("receipt remains failed but reconciliation audit failed: %w", err)
 		}
 		return &receipt, nil
 	}
 
-	if strings.TrimSpace(taskID) == "" {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
 		return nil, errors.New("task_id required for link_task")
 	}
-	t, err := m.rt.Task(strings.TrimSpace(taskID))
+	t, err := m.rt.Task(taskID)
 	if err != nil {
 		return nil, fmt.Errorf("task lookup failed: %w", err)
 	}
@@ -155,12 +154,12 @@ func (m *Manager) ReconcileInboundReceipt(id, decision, taskID, note string) (*I
 	// Linking an existing Task promotes ambiguous evidence to accepted evidence,
 	// so the exact decision is audited before the receipt becomes accepted.
 	if err := m.audit("channel.inbound.reconciled.linked", map[string]any{
-		"receipt_id": id,
-		"channel_id": receipt.ChannelID,
-		"session_id": sessionID,
-		"task_id": t.ID,
+		"receipt_id":       id,
+		"channel_id":       receipt.ChannelID,
+		"session_id":       sessionID,
+		"task_id":          t.ID,
 		"sender_sha256_96": senderDigest(receipt.Sender),
-		"note": note,
+		"note":             note,
 	}); err != nil {
 		return nil, fmt.Errorf("receipt remains unresolved because reconciliation audit failed: %w", err)
 	}
@@ -206,5 +205,3 @@ func (m *Manager) httpInboundReconcile(w http.ResponseWriter, r *http.Request) {
 	receipt, err := m.ReconcileInboundReceipt(r.PathValue("id"), in.Decision, in.TaskID, in.Note)
 	respondPlatform(w, receipt, err)
 }
-
-var _ = os.ErrNotExist
