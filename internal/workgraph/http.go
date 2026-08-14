@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -161,7 +162,7 @@ func decodeWorkGraphJSON(r *http.Request, dst any) error {
 }
 
 func writeWorkGraphStoreError(w http.ResponseWriter, err error) {
-	if errors.Is(err, osErrNotExist()) {
+	if errors.Is(err, os.ErrNotExist) {
 		writeWorkGraphError(w, http.StatusNotFound, "workgraph not found")
 		return
 	}
@@ -180,12 +181,6 @@ func writeWorkGraphStoreError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeWorkGraphError(w, http.StatusInternalServerError, "workgraph operation failed")
-}
-
-// osErrNotExist is isolated to keep HTTP error classification testable without
-// exposing storage paths in responses.
-func osErrNotExist() error {
-	return errors.New("file does not exist")
 }
 
 func writeWorkGraphError(w http.ResponseWriter, status int, message string) {
