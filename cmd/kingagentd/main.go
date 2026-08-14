@@ -93,12 +93,15 @@ func main() {
 	root.Handle("/v1/platform/metrics", statusScoped)
 	root.Handle("/v1/platform/", platformScoped)
 
-	// Reviewed knowledge is readable by scoped users. Creating/reviewing durable
-	// long-term knowledge remains an administrative trust decision.
-	knowledgeRead := pm.ScopedAuthHandler(cfg.Server.AdminTokenEnv, ks.Handler())
-	knowledgeAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, ks.Handler())
-	root.Handle("GET /v1/knowledge/", knowledgeRead)
-	root.Handle("POST /v1/knowledge/", knowledgeAdmin)
+	// Scoped readers can see only approved knowledge. Proposal creation,
+	// inspection and review live under the distinct admin namespace.
+	knowledgeRead := pm.ScopedAuthHandler(cfg.Server.AdminTokenEnv, ks.ReadHandler())
+	knowledgeAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, ks.AdminHandler())
+	root.Handle("GET /v1/knowledge/items", knowledgeRead)
+	root.Handle("GET /v1/knowledge/items/", knowledgeRead)
+	root.Handle("GET /v1/knowledge/search", knowledgeRead)
+	root.Handle("GET /v1/knowledge/neighbors", knowledgeRead)
+	root.Handle("/v1/knowledge/admin/", knowledgeAdmin)
 
 	// Cluster administration is privileged. Workers never receive admin tokens;
 	// they authenticate with one-time-issued worker credentials on a separate API.
