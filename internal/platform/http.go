@@ -17,6 +17,7 @@ func (m *Manager) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/platform/capabilities", m.httpCapabilities)
 	mux.HandleFunc("GET /v1/platform/agents", m.httpAgents)
 	mux.HandleFunc("POST /v1/platform/agents", m.httpAgents)
+	mux.HandleFunc("POST /v1/platform/agents/{id}/enabled", m.httpAgentEnabled)
 	mux.HandleFunc("GET /v1/platform/sessions", m.httpSessions)
 	mux.HandleFunc("POST /v1/platform/sessions", m.httpSessions)
 	mux.HandleFunc("GET /v1/platform/sessions/{id}", m.httpSession)
@@ -26,6 +27,7 @@ func (m *Manager) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/platform/schedules/{id}/enabled", m.httpScheduleEnabled)
 	mux.HandleFunc("GET /v1/platform/workflows", m.httpWorkflows)
 	mux.HandleFunc("POST /v1/platform/workflows", m.httpWorkflows)
+	mux.HandleFunc("POST /v1/platform/workflows/{id}/enabled", m.httpWorkflowEnabled)
 	mux.HandleFunc("POST /v1/platform/workflows/{id}/run", m.httpWorkflowRun)
 	mux.HandleFunc("GET /v1/platform/workflow-runs", m.httpWorkflowRuns)
 	mux.HandleFunc("GET /v1/platform/nodes", m.httpNodes)
@@ -33,10 +35,13 @@ func (m *Manager) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/platform/nodes/{id}/heartbeat", m.httpNodeHeartbeat)
 	mux.HandleFunc("GET /v1/platform/plugins", m.httpPlugins)
 	mux.HandleFunc("POST /v1/platform/plugins", m.httpPlugins)
+	mux.HandleFunc("POST /v1/platform/plugins/{id}/enabled", m.httpPluginEnabled)
 	mux.HandleFunc("GET /v1/platform/channels", m.httpChannels)
 	mux.HandleFunc("POST /v1/platform/channels", m.httpChannels)
+	mux.HandleFunc("POST /v1/platform/channels/{id}/enabled", m.httpChannelEnabled)
 	mux.HandleFunc("GET /v1/platform/skills", m.httpSkills)
 	mux.HandleFunc("POST /v1/platform/skills", m.httpSkills)
+	mux.HandleFunc("POST /v1/platform/skills/{id}/enabled", m.httpSkillEnabled)
 	mux.HandleFunc("GET /v1/platform/missions", m.httpMissions)
 	mux.HandleFunc("POST /v1/platform/missions", m.httpMissions)
 	mux.HandleFunc("GET /v1/platform/missions/{id}", m.httpMission)
@@ -46,13 +51,14 @@ func (m *Manager) Handler() http.Handler {
 func (m *Manager) httpCapabilities(w http.ResponseWriter, _ *http.Request) {
 	writePlatformJSON(w, http.StatusOK, map[string]any{
 		"platform": "KINGAIBOT Platform Control Plane",
-		"version":  "1.3",
+		"version":  "1.4",
 		"capabilities": []string{
 			"durable_sessions", "agent_profiles", "recurring_schedules", "durable_workflows",
 			"parallel_multi_agent_missions", "device_nodes", "remote_plugins", "channel_adapters",
 			"skills_with_integrity_hashes", "policy_gated_extension_tools", "restart_recovery",
+			"audit_before_activation", "safe_scheduler", "node_heartbeat_gate",
 		},
-		"security_boundary": "all agent-triggered extension side effects remain mediated by the core tool policy, exact approvals and hash-chained audit log",
+		"security_boundary": "all agent-triggered extension side effects remain mediated by the core tool policy, exact approvals and hash-chained audit log; trust-expanding platform activation is audit-first",
 	})
 }
 
@@ -66,8 +72,17 @@ func (m *Manager) httpAgents(w http.ResponseWriter, r *http.Request) {
 	if !decodePlatform(w, r, &in) {
 		return
 	}
-	v, err := m.CreateAgent(in)
+	v, err := m.CreateAgentSafe(in)
 	respondCreated(w, v, err)
+}
+
+func (m *Manager) httpAgentEnabled(w http.ResponseWriter, r *http.Request) {
+	enabled, ok := decodeEnabled(w, r)
+	if !ok {
+		return
+	}
+	v, err := m.SetAgentEnabledSafe(r.PathValue("id"), enabled)
+	respondPlatform(w, v, err)
 }
 
 func (m *Manager) httpSessions(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +111,7 @@ func (m *Manager) httpSessionMessage(w http.ResponseWriter, r *http.Request) {
 	if !decodePlatform(w, r, &in) {
 		return
 	}
-	v, err := m.SendSession(r.PathValue("id"), in.Message)
+	v, err := m.SendSessionSafe(r.PathValue("id"), in.Message)
 	if err != nil {
 		platformProblem(w, err)
 		return
@@ -114,22 +129,16 @@ func (m *Manager) httpSchedules(w http.ResponseWriter, r *http.Request) {
 	if !decodePlatform(w, r, &in) {
 		return
 	}
-	v, err := m.CreateSchedule(in)
+	v, err := m.CreateScheduleSafe(in)
 	respondCreated(w, v, err)
 }
 
 func (m *Manager) httpScheduleEnabled(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Enabled *bool `json:"enabled"`
-	}
-	if !decodePlatform(w, r, &in) {
+	enabled, ok := decodeEnabled(w, r)
+	if !ok {
 		return
 	}
-	if in.Enabled == nil {
-		writePlatformJSON(w, http.StatusBadRequest, map[string]any{"error": "enabled_required"})
-		return
-	}
-	v, err := m.SetScheduleEnabled(r.PathValue("id"), *in.Enabled)
+	v, err := m.SetScheduleEnabledSafe(r.PathValue("id"), enabled)
 	respondPlatform(w, v, err)
 }
 
@@ -143,12 +152,21 @@ func (m *Manager) httpWorkflows(w http.ResponseWriter, r *http.Request) {
 	if !decodePlatform(w, r, &in) {
 		return
 	}
-	v, err := m.CreateWorkflow(in)
+	v, err := m.CreateWorkflowSafe(in)
 	respondCreated(w, v, err)
 }
 
+func (m *Manager) httpWorkflowEnabled(w http.ResponseWriter, r *http.Request) {
+	enabled, ok := decodeEnabled(w, r)
+	if !ok {
+		return
+	}
+	v, err := m.SetWorkflowEnabledSafe(r.PathValue("id"), enabled)
+	respondPlatform(w, v, err)
+}
+
 func (m *Manager) httpWorkflowRun(w http.ResponseWriter, r *http.Request) {
-	v, err := m.RunWorkflow(r.PathValue("id"))
+	v, err := m.RunWorkflowSafe(r.PathValue("id"))
 	if err != nil {
 		platformProblem(w, err)
 		return
@@ -163,7 +181,7 @@ func (m *Manager) httpWorkflowRuns(w http.ResponseWriter, _ *http.Request) {
 
 func (m *Manager) httpNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		v, err := m.Nodes()
+		v, err := m.NodesSafe()
 		respondPlatform(w, v, err)
 		return
 	}
@@ -171,7 +189,7 @@ func (m *Manager) httpNodes(w http.ResponseWriter, r *http.Request) {
 	if !decodePlatform(w, r, &in) {
 		return
 	}
-	v, err := m.CreateNode(in)
+	v, err := m.CreateNodeSafe(in)
 	respondCreated(w, v, err)
 }
 
@@ -182,7 +200,7 @@ func (m *Manager) httpNodeHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if !decodePlatform(w, r, &in) {
 		return
 	}
-	v, err := m.HeartbeatNode(r.PathValue("id"), in.Metadata)
+	v, err := m.HeartbeatNodeSafe(r.PathValue("id"), in.Metadata)
 	respondPlatform(w, v, err)
 }
 
@@ -196,8 +214,17 @@ func (m *Manager) httpPlugins(w http.ResponseWriter, r *http.Request) {
 	if !decodePlatform(w, r, &in) {
 		return
 	}
-	v, err := m.CreatePlugin(in)
+	v, err := m.CreatePluginSafe(in)
 	respondCreated(w, v, err)
+}
+
+func (m *Manager) httpPluginEnabled(w http.ResponseWriter, r *http.Request) {
+	enabled, ok := decodeEnabled(w, r)
+	if !ok {
+		return
+	}
+	v, err := m.SetPluginEnabledSafe(r.PathValue("id"), enabled)
+	respondPlatform(w, v, err)
 }
 
 func (m *Manager) httpChannels(w http.ResponseWriter, r *http.Request) {
@@ -210,8 +237,17 @@ func (m *Manager) httpChannels(w http.ResponseWriter, r *http.Request) {
 	if !decodePlatform(w, r, &in) {
 		return
 	}
-	v, err := m.CreateChannel(in)
+	v, err := m.CreateChannelSafe(in)
 	respondCreated(w, v, err)
+}
+
+func (m *Manager) httpChannelEnabled(w http.ResponseWriter, r *http.Request) {
+	enabled, ok := decodeEnabled(w, r)
+	if !ok {
+		return
+	}
+	v, err := m.SetChannelEnabledSafe(r.PathValue("id"), enabled)
+	respondPlatform(w, v, err)
 }
 
 func (m *Manager) httpSkills(w http.ResponseWriter, r *http.Request) {
@@ -224,8 +260,17 @@ func (m *Manager) httpSkills(w http.ResponseWriter, r *http.Request) {
 	if !decodePlatform(w, r, &in) {
 		return
 	}
-	v, err := m.CreateSkill(in)
+	v, err := m.CreateSkillSafe(in)
 	respondCreated(w, v, err)
+}
+
+func (m *Manager) httpSkillEnabled(w http.ResponseWriter, r *http.Request) {
+	enabled, ok := decodeEnabled(w, r)
+	if !ok {
+		return
+	}
+	v, err := m.SetSkillEnabledSafe(r.PathValue("id"), enabled)
+	respondPlatform(w, v, err)
 }
 
 func (m *Manager) httpMissions(w http.ResponseWriter, r *http.Request) {
@@ -238,7 +283,7 @@ func (m *Manager) httpMissions(w http.ResponseWriter, r *http.Request) {
 	if !decodePlatform(w, r, &in) {
 		return
 	}
-	v, err := m.DispatchMission(in)
+	v, err := m.DispatchMissionSafe(in)
 	if err != nil {
 		platformProblem(w, err)
 		return
@@ -249,6 +294,20 @@ func (m *Manager) httpMissions(w http.ResponseWriter, r *http.Request) {
 func (m *Manager) httpMission(w http.ResponseWriter, r *http.Request) {
 	v, err := m.Mission(r.PathValue("id"))
 	respondPlatform(w, v, err)
+}
+
+func decodeEnabled(w http.ResponseWriter, r *http.Request) (bool, bool) {
+	var in struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if !decodePlatform(w, r, &in) {
+		return false, false
+	}
+	if in.Enabled == nil {
+		writePlatformJSON(w, http.StatusBadRequest, map[string]any{"error": "enabled_required"})
+		return false, false
+	}
+	return *in.Enabled, true
 }
 
 func decodePlatform(w http.ResponseWriter, r *http.Request, dst any) bool {

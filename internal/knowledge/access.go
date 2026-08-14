@@ -7,18 +7,10 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"sync"
 )
 
-var reviewGate sync.Map // map[*Store]*sync.Mutex
-
-func (s *Store) reviewLock() *sync.Mutex {
-	v, _ := reviewGate.LoadOrStore(s, &sync.Mutex{})
-	return v.(*sync.Mutex)
-}
-
-// ReadHandler exposes only operator-approved knowledge. Proposed/rejected items
-// are deliberately invisible even when their IDs are known.
+// ReadHandler exposes only operator-approved knowledge. Proposed/rejected and
+// pending_audit items are deliberately invisible even when their IDs are known.
 func (s *Store) ReadHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/knowledge/items", s.readApprovedItems)
@@ -28,8 +20,9 @@ func (s *Store) ReadHandler() http.Handler {
 	return mux
 }
 
-// AdminHandler owns proposal creation, inspection and review. It is intended to
-// be mounted behind platform.admin rather than a general read/write scope.
+// AdminHandler owns proposal creation, inspection and review. Trust-changing
+// operations use the crash-safe surface and are intended to be mounted behind
+// platform.admin rather than a general read/write scope.
 func (s *Store) AdminHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/knowledge/admin/items", s.adminItems)
@@ -70,11 +63,9 @@ func (s *Store) adminItems(w http.ResponseWriter, r *http.Request) {
 	var v *Item
 	var err error
 	if in.Approved {
-		// Directly creating trusted knowledge is an administrative action and still
-		// follows audit-before-trust semantics inside CreateApproved.
-		v, err = s.CreateApproved(in.Item, in.ReviewNote)
+		v, err = s.CreateApprovedSafe(in.Item, in.ReviewNote)
 	} else {
-		v, err = s.CreateProposal(in.Item)
+		v, err = s.CreateProposalSafe(in.Item)
 	}
 	write(w, v, err, http.StatusCreated)
 }
@@ -92,12 +83,7 @@ func (s *Store) adminReview(w http.ResponseWriter, r *http.Request) {
 	if err := strictDecode(w, r, &in); err != nil {
 		return
 	}
-	// Review() performs audit-before-trust. Serializing reviews here removes the
-	// possibility that two simultaneous admin requests review the same proposal.
-	gate := s.reviewLock()
-	gate.Lock()
-	v, err := s.Review(r.PathValue("id"), in.Decision, in.Note)
-	gate.Unlock()
+	v, err := s.ReviewSafe(r.PathValue("id"), in.Decision, in.Note)
 	write(w, v, err, http.StatusOK)
 }
 

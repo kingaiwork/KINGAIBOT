@@ -26,7 +26,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/storage"
 )
 
-var version = "1.3.0"
+var version = "1.4.0"
 
 type stringList []string
 
@@ -165,7 +165,7 @@ func (c *workerClient) request(ctx context.Context, method, path string, body an
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "KINGAIBOT-Worker/1.3")
+	req.Header.Set("User-Agent", "KINGAIBOT-Worker/1.4")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -356,7 +356,7 @@ func (c *workerClient) httpGet(ctx context.Context, raw json.RawMessage) (any, e
 		return nil, err
 	}
 	req.Header.Set("Accept", "*/*")
-	req.Header.Set("User-Agent", "KINGAIBOT-Worker/1.3")
+	req.Header.Set("User-Agent", "KINGAIBOT-Worker/1.4")
 	client := netguard.Client(60*time.Second, false)
 	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {

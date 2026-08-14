@@ -32,7 +32,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/workgraph"
 )
 
-var version = "1.3.0"
+var version = "1.4.0"
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "configuration file")
@@ -74,14 +74,21 @@ func main() {
 	taskAuthorityResolver, mustErr := authority.NewTaskAuthorityResolver(ts)
 	must(mustErr)
 
-	pm, mustErr := platform.New(filepath.Join(cfg.Runtime.DataDir, "platform"), boundPlatformRuntime, el)
+	// Production uses the crash-safe Platform control surface. Trust-expanding
+	// resources are inert until their authorization audit is durable; schedules
+	// and recovered workflows also require an audit gate before creating tasks.
+	pm, mustErr := platform.NewSafe(filepath.Join(cfg.Runtime.DataDir, "platform"), boundPlatformRuntime, el)
 	must(mustErr)
 	defer pm.Close()
-	tr.RegisterExtension(pm)
+	platformExtension, mustErr := platform.NewV14Extension(pm)
+	must(mustErr)
+	tr.RegisterExtension(platformExtension)
 
 	ks, mustErr := knowledge.New(filepath.Join(cfg.Runtime.DataDir, "knowledge"), el)
 	must(mustErr)
-	tr.RegisterExtension(ks)
+	knowledgeExtension, mustErr := knowledge.NewSafeExtension(ks)
+	must(mustErr)
+	tr.RegisterExtension(knowledgeExtension)
 
 	cc, mustErr := cluster.New(filepath.Join(cfg.Runtime.DataDir, "cluster"), el)
 	must(mustErr)
@@ -101,18 +108,31 @@ func main() {
 
 	must(rt.Recover())
 
-	coreHandler := api.New(cfg, rt, tr).Handler()
+	coreServer := api.New(cfg, rt, tr)
+	coreHandler := coreServer.Handler()
 	root := http.NewServeMux()
 
+	// Runtime reconciliation and staged approval decisions are exact admin-only
+	// routes. They stay outside MCP/A2A/model tools because ambiguous side effects
+	// and trust expansion require operator review.
+	root.Handle("POST /v1/tasks/{id}/reconcile", coreServer.TaskReconciliationHandler())
+	approvalV14 := coreServer.ApprovalDecisionV14Handler()
+	root.Handle("POST /v1/approvals/{id}", approvalV14)
+	root.Handle("POST /v1/approvals/{id}/decision", approvalV14)
+
 	// Scoped platform API: legacy admin secret remains accepted, while durable
-	// access keys can be granted read/write roles without receiving core admin.
-	platformScoped := pm.ScopedAuthHandler(cfg.Server.AdminTokenEnv, pm.Handler())
+	// access keys are evaluated against the path-level read/write/automation/admin
+	// permission boundary before reaching the v1.4 control-plane handler.
+	platformScoped := pm.GovernedScopedAuthHandler(cfg.Server.AdminTokenEnv, pm.HandlerV14())
 	identityAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, pm.IdentityHandler())
+	inboundAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, pm.InboundAdminHandler())
 	statusScoped := pm.ScopedAuthHandler(cfg.Server.AdminTokenEnv, pm.StatusHandler())
 	root.Handle("/v1/platform/identities", identityAdmin)
 	root.Handle("/v1/platform/identities/", identityAdmin)
 	root.Handle("/v1/platform/access-keys", identityAdmin)
 	root.Handle("/v1/platform/access-keys/", identityAdmin)
+	root.Handle("/v1/platform/inbound-receipts", inboundAdmin)
+	root.Handle("/v1/platform/inbound-receipts/", inboundAdmin)
 	root.Handle("/v1/platform/status", statusScoped)
 	root.Handle("/v1/platform/metrics", statusScoped)
 	root.Handle("/v1/platform/", platformScoped)
@@ -151,9 +171,12 @@ func main() {
 
 	// Capability Envelopes are immutable authority grants. Delegation can only
 	// narrow authority, and revoking a parent makes every descendant ineffective.
+	// Budget usage/preflight stays on the same admin-only authority surface;
+	// preflight is advisory and execution always rechecks atomically.
 	authorityAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, authorityStore.Handler())
 	root.Handle("/v1/authority/envelopes", authorityAdmin)
 	root.Handle("/v1/authority/envelopes/", authorityAdmin)
+	root.Handle("/v1/authority/usage", authorityAdmin)
 
 	// Orchestration performs the race-free handoff from a Ready/approved
 	// WorkGraph execute/delegate node to an authority-bound Cluster job. This
@@ -161,13 +184,14 @@ func main() {
 	orchestrationAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, orchestrator.Handler())
 	root.Handle("/v1/orchestration/", orchestrationAdmin)
 
-	// Channel-specific inbound authentication is enforced inside InboundHandler.
-	root.Handle("/v1/inbound/", pm.InboundHandler())
+	// Channel-specific inbound authentication, durable Session submission and
+	// conservative retry/reconciliation semantics are enforced in the v1.4 gateway.
+	root.Handle("/v1/inbound/", pm.InboundHandlerV14())
 	root.Handle("/", coreHandler)
 
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "enabled", "knowledge", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "v1.4-safe", "knowledge", "safe", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)

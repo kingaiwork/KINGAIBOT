@@ -3,6 +3,7 @@ package platform
 import (
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -15,10 +16,11 @@ type platformTaskLister interface {
 }
 
 type Status struct {
-	Time         time.Time      `json:"time"`
-	Counts       map[string]int `json:"counts"`
-	TaskStatuses map[string]int `json:"task_statuses,omitempty"`
-	Healthy      bool           `json:"healthy"`
+	Time              time.Time      `json:"time"`
+	Counts            map[string]int `json:"counts"`
+	TaskStatuses      map[string]int `json:"task_statuses,omitempty"`
+	Healthy           bool           `json:"healthy"`
+	AttentionRequired bool           `json:"attention_required"`
 }
 
 func (m *Manager) StatusSnapshot() (*Status, error) {
@@ -53,12 +55,18 @@ func (m *Manager) StatusSnapshot() (*Status, error) {
 	} else {
 		counts["workflow_runs"] = len(v)
 		for _, x := range v {
-			if x.Status == "running" {
+			switch x.Status {
+			case "running", workflowRunStatusV14:
 				counts["workflow_runs_running"]++
+			case "reconciliation":
+				counts["workflow_runs_reconciliation"]++
 			}
 		}
 	}
-	if v, err := m.Nodes(); err != nil {
+
+	// Status reads must never promote a Node to Online. NodesSafe may demote a
+	// stale audited heartbeat, but only HeartbeatNodeSafe may promote trust.
+	if v, err := m.NodesSafe(); err != nil {
 		return nil, err
 	} else {
 		counts["nodes"] = len(v)
@@ -98,16 +106,26 @@ func (m *Manager) StatusSnapshot() (*Status, error) {
 			}
 		}
 	}
-	if v, err := m.Missions(); err != nil {
+
+	// First synchronize compatibility missions, then V14 missions. The final
+	// list comes from the V14 reader so running_v14/reconciliation is current.
+	if _, err := m.Missions(); err != nil {
+		return nil, err
+	}
+	if v, err := m.MissionsV14(); err != nil {
 		return nil, err
 	} else {
 		counts["missions"] = len(v)
 		for _, x := range v {
-			if x.Status == "running" {
+			switch x.Status {
+			case "running", missionRunningStatusV14, missionDispatchStatusV14:
 				counts["missions_running"]++
+			case "reconciliation":
+				counts["missions_reconciliation"]++
 			}
 		}
 	}
+
 	if v, err := m.Identities(); err == nil {
 		counts["identities"] = len(v)
 		for _, x := range v {
@@ -125,6 +143,33 @@ func (m *Manager) StatusSnapshot() (*Status, error) {
 			}
 		}
 	}
+
+	// Count all inbound receipts directly rather than using the paginated admin
+	// listing so operational totals remain exact even above the API page limit.
+	if err := m.ensureInboundDir(); err != nil {
+		return nil, err
+	}
+	m.mu.RLock()
+	receipts, err := listJSON[InboundReceipt](filepath.Join(m.dir, "inbound-receipts"))
+	m.mu.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	counts["inbound_receipts"] = len(receipts)
+	for _, receipt := range receipts {
+		if receipt == nil {
+			continue
+		}
+		switch receipt.Status {
+		case "processing":
+			counts["inbound_receipts_processing"]++
+		case "reconciliation":
+			counts["inbound_receipts_reconciliation"]++
+		case "failed":
+			counts["inbound_receipts_failed"]++
+		}
+	}
+
 	statuses := map[string]int{}
 	if lister, ok := m.rt.(platformTaskLister); ok {
 		if tasks, err := lister.Tasks(); err == nil {
@@ -132,9 +177,17 @@ func (m *Manager) StatusSnapshot() (*Status, error) {
 			for _, t := range tasks {
 				statuses[string(t.Status)]++
 			}
+			counts["runtime_tasks_reconciliation"] = statuses[string(task.Reconciliation)]
+			counts["runtime_tasks_completing"] = statuses[string(task.Completing)]
+			counts["runtime_tasks_pending_audit"] = statuses[string(task.PendingAudit)]
 		}
 	}
-	return &Status{Time: now(), Counts: counts, TaskStatuses: statuses, Healthy: true}, nil
+
+	attention := counts["runtime_tasks_reconciliation"] > 0 ||
+		counts["workflow_runs_reconciliation"] > 0 ||
+		counts["missions_reconciliation"] > 0 ||
+		counts["inbound_receipts_reconciliation"] > 0
+	return &Status{Time: now(), Counts: counts, TaskStatuses: statuses, Healthy: true, AttentionRequired: attention}, nil
 }
 
 func (m *Manager) StatusHandler() http.Handler {
@@ -168,6 +221,11 @@ func (m *Manager) StatusHandler() http.Handler {
 		for _, k := range statusKeys {
 			fmt.Fprintf(&b, "kingaibot_runtime_tasks{status=%q} %d\n", k, status.TaskStatuses[k])
 		}
+		attention := 0
+		if status.AttentionRequired {
+			attention = 1
+		}
+		fmt.Fprintf(&b, "kingaibot_platform_attention_required %d\n", attention)
 		_, _ = w.Write([]byte(b.String()))
 	})
 	return mux

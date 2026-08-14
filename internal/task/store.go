@@ -15,9 +15,12 @@ import (
 type Status string
 
 const (
+	PendingAudit    Status = "pending_audit"
 	Queued          Status = "queued"
 	Running         Status = "running"
 	WaitingApproval Status = "waiting_approval"
+	Completing      Status = "completing"
+	Reconciliation  Status = "reconciliation"
 	Completed       Status = "completed"
 	Failed          Status = "failed"
 	Canceled        Status = "canceled"
@@ -79,6 +82,31 @@ func (s *Store) Save(t *Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.saveLocked(t)
+}
+
+// SaveIfAbsent persists a Task only when its ID is not already present in this
+// Store. It is serialized with all other Store writes and is the primitive used
+// by deterministic/idempotent Runtime task creation. Existing tasks are never
+// overwritten by a repeated attempt.
+func (s *Store) SaveIfAbsent(t *Task) (bool, error) {
+	if t == nil {
+		return false, errors.New("task required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, err := s.path(t.ID)
+	if err != nil {
+		return false, err
+	}
+	if _, err = os.Stat(p); err == nil {
+		return false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if err := s.saveLocked(t); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Store) getLocked(id string) (*Task, error) {
@@ -151,7 +179,7 @@ func (s *Store) Recoverable() ([]*Task, error) {
 	}
 	out := []*Task{}
 	for _, t := range all {
-		if t.Status == Running || t.Status == Queued {
+		if t.Status == PendingAudit || t.Status == Running || t.Status == Completing || t.Status == Queued {
 			out = append(out, t)
 		}
 	}
@@ -162,6 +190,9 @@ func (s *Store) Cancel(id string) error {
 	_, err := s.Update(id, func(t *Task) error {
 		if t.Status == Completed || t.Status == Failed || t.Status == Canceled {
 			return errors.New("task already terminal")
+		}
+		if t.Status == Completing || t.Status == Reconciliation {
+			return errors.New("task has ambiguous side effects and requires reconciliation")
 		}
 		t.Status = Canceled
 		t.PendingApproval = ""

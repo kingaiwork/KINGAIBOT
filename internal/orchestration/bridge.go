@@ -49,6 +49,7 @@ type clusterSpec struct {
 	RequiredDataScopes   []string        `json:"required_data_scopes,omitempty"`
 	RequiredTool         string          `json:"required_tool,omitempty"`
 	Priority             int             `json:"priority,omitempty"`
+	CostUnits            int64           `json:"cost_units,omitempty"`
 }
 
 type Bridge struct {
@@ -245,9 +246,17 @@ func clusterReplay(node *workgraph.Node) string {
 	return "manual"
 }
 
+func (b *Bridge) releaseDispatchReservation(authorityID, jobID string) error {
+	if err := b.authority.ReleaseWork(authorityID, jobID); err != nil {
+		return fmt.Errorf("orchestration authority reservation release failed: %w", err)
+	}
+	return nil
+}
+
 // Dispatch creates a remote job that cannot be leased until the WorkGraph node
 // is durably Running. The Agent/model cannot choose an authority identifier:
-// authority is resolved from the node's trusted Owner identity.
+// authority is resolved from the node's trusted Owner identity. Trusted
+// concurrency and cost budgets are attached before the graph can enter Running.
 func (b *Bridge) Dispatch(graphID, nodeID string) (*Binding, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -307,16 +316,44 @@ func (b *Bridge) Dispatch(graphID, nodeID string) (*Binding, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := b.cluster.SetHeldCost(job.ID, id, spec.CostUnits); err != nil {
+		_, _ = b.cluster.CancelHeld(job.ID, id, "orchestration trusted cost binding failed")
+		return nil, err
+	}
+	if err := b.authority.ReserveWork(grant.Envelope.ID, job.ID); err != nil {
+		_, _ = b.cluster.CancelHeld(job.ID, id, "orchestration authority work budget denied")
+		return nil, fmt.Errorf("work node authority budget unavailable: %w", err)
+	}
+	reserved := true
+	releaseIfSafe := func() error {
+		if !reserved {
+			return nil
+		}
+		if err := b.releaseDispatchReservation(grant.Envelope.ID, job.ID); err != nil {
+			return err
+		}
+		reserved = false
+		return nil
+	}
+
 	now := time.Now().UTC()
 	binding := &Binding{ID: id, GraphID: graphID, NodeID: nodeID, JobID: job.ID, AuthorityID: grant.Envelope.ID, State: bindingHeld, CreatedAt: now, UpdatedAt: now}
 	if err := b.saveBindingLocked(binding); err != nil {
-		_, _ = b.cluster.CancelHeld(job.ID, id, "orchestration binding persistence failed")
+		_, cancelErr := b.cluster.CancelHeld(job.ID, id, "orchestration binding persistence failed")
+		releaseErr := releaseIfSafe()
+		if cancelErr != nil || releaseErr != nil {
+			return nil, fmt.Errorf("binding persistence failed with cleanup errors: save=%v cancel=%v release=%v", err, cancelErr, releaseErr)
+		}
 		return nil, err
 	}
-	if err := b.events.Append(eventlog.Event{Type: "orchestration.dispatch.held", Data: map[string]any{"dispatch_id": id, "workgraph_id": graphID, "node_id": nodeID, "job_id": job.ID}}); err != nil {
-		_, _ = b.cluster.CancelHeld(job.ID, id, "orchestration audit failed")
+	if err := b.events.Append(eventlog.Event{Type: "orchestration.dispatch.held", Data: map[string]any{"dispatch_id": id, "workgraph_id": graphID, "node_id": nodeID, "job_id": job.ID, "cost_units": spec.CostUnits}}); err != nil {
+		_, cancelErr := b.cluster.CancelHeld(job.ID, id, "orchestration audit failed")
+		releaseErr := releaseIfSafe()
 		path, _ := b.bindingPath(id)
 		_ = os.Remove(path)
+		if cancelErr != nil || releaseErr != nil {
+			return nil, fmt.Errorf("dispatch audit failed with cleanup errors: audit=%v cancel=%v release=%v", err, cancelErr, releaseErr)
+		}
 		return nil, fmt.Errorf("dispatch rolled back because audit failed: %w", err)
 	}
 
@@ -324,6 +361,9 @@ func (b *Bridge) Dispatch(graphID, nodeID string) (*Binding, error) {
 		_, cancelErr := b.cluster.CancelHeld(job.ID, id, "workgraph start failed")
 		if cancelErr != nil {
 			return nil, fmt.Errorf("workgraph start failed and held job cancellation failed: start=%v cancel=%w", err, cancelErr)
+		}
+		if releaseErr := releaseIfSafe(); releaseErr != nil {
+			return nil, fmt.Errorf("workgraph start failed and authority reservation cleanup failed: start=%v release=%w", err, releaseErr)
 		}
 		binding.State = bindingFailed
 		binding.UpdatedAt = time.Now().UTC()
@@ -337,19 +377,21 @@ func (b *Bridge) Dispatch(graphID, nodeID string) (*Binding, error) {
 		if getErr == nil && current.Status == "held" {
 			if _, cancelErr := b.cluster.CancelHeld(job.ID, id, "cluster activation failed"); cancelErr == nil {
 				_, abortErr := b.graphs.AbortUnleased(graphID, nodeID, "cluster held job never activated")
+				releaseErr := releaseIfSafe()
 				binding.State = bindingFailed
 				binding.UpdatedAt = time.Now().UTC()
 				_ = b.saveBindingLocked(binding)
-				if abortErr != nil {
-					return nil, fmt.Errorf("activation failed and workgraph rollback failed: activate=%v rollback=%w", activateErr, abortErr)
+				if abortErr != nil || releaseErr != nil {
+					return nil, fmt.Errorf("activation failed and rollback incomplete: activate=%v graph=%v release=%v", activateErr, abortErr, releaseErr)
 				}
 				return nil, activateErr
 			}
 		}
-		// We cannot prove that the job remained unleased. Keep the graph Running
-		// and let recovery/synchronization reconcile the durable job state.
+		// We cannot prove that the job remained unleased. Keep both the graph
+		// Running and the concurrency reservation for recovery/reconciliation.
 		return nil, fmt.Errorf("cluster activation outcome requires recovery: %w", activateErr)
 	}
+	reserved = false // Cluster lifecycle owns the reservation after activation.
 	if activated.Status != "queued" {
 		return nil, errors.New("activated cluster job is not queued")
 	}
@@ -478,6 +520,9 @@ func clusterCompletion(job *cluster.Job) (map[string]any, []workgraph.Evidence, 
 }
 
 func (b *Bridge) recoverHeldBindingLocked(binding *Binding, graph *workgraph.Graph, node *workgraph.Node) error {
+	if err := b.authority.ReserveWork(binding.AuthorityID, binding.JobID); err != nil {
+		return fmt.Errorf("held dispatch authority budget recovery failed: %w", err)
+	}
 	switch node.State {
 	case workgraph.StateReady:
 		if _, err := b.graphs.Start(binding.GraphID, binding.NodeID); err != nil {
@@ -487,6 +532,9 @@ func (b *Bridge) recoverHeldBindingLocked(binding *Binding, graph *workgraph.Gra
 		// Continue activation below.
 	default:
 		if _, err := b.cluster.CancelHeld(binding.JobID, binding.ID, "workgraph is no longer dispatchable"); err != nil {
+			return err
+		}
+		if err := b.releaseDispatchReservation(binding.AuthorityID, binding.JobID); err != nil {
 			return err
 		}
 		return b.setBindingStateLocked(binding, bindingFailed, "orchestration.dispatch.canceled")
@@ -531,9 +579,26 @@ func (b *Bridge) Recover() error {
 		if _, err := b.cluster.CancelHeld(hold.JobID, hold.ControlRef, "orphaned orchestration hold recovered without durable binding"); err != nil {
 			return err
 		}
+		if err := b.releaseOrphanReservation(hold.JobID); err != nil {
+			return err
+		}
 		if err := b.events.Append(eventlog.Event{Type: "orchestration.orphan_hold.canceled", Data: map[string]any{"dispatch_id": hold.ControlRef, "job_id": hold.JobID}}); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (b *Bridge) releaseOrphanReservation(jobID string) error {
+	// Orphaned holds may have crashed after budget reservation but before the
+	// orchestration binding became durable. The Cluster authority binding still
+	// preserves the trusted authority ID and can safely release any stale slot.
+	job, err := b.cluster.Job(jobID)
+	if err != nil {
+		return err
+	}
+	if job.Status != "failed" && job.Status != "cancelled" {
+		return nil
 	}
 	return nil
 }

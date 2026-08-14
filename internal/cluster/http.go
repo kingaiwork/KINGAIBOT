@@ -84,7 +84,7 @@ func (c *Coordinator) httpJobs(w http.ResponseWriter, r *http.Request) {
 	if !clusterDecode(w, r, &in) {
 		return
 	}
-	v, err := c.SubmitAuthorized(in.Job, in.AuthorityID, in.RequiredDataScopes, in.RequiredTool)
+	v, err := c.SubmitAuthorizedBudgeted(in.Job, in.AuthorityID, in.RequiredDataScopes, in.RequiredTool, in.CostUnits)
 	clusterWrite(w, v, err, http.StatusCreated)
 }
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${VERSION:-${GITHUB_REF_NAME:-1.3.0}}"
+VERSION="${VERSION:-${GITHUB_REF_NAME:-1.4.0}}"
 VERSION="${VERSION#v}"
 MIN_GO_VERSION="${KINGAGENT_MIN_RELEASE_GO:-1.26.6}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIST="${DIST:-$ROOT/dist-v13}"
+DIST="${DIST:-$ROOT/dist-v14}"
 GO_VERSION="$(go env GOVERSION)"
 
 python3 - "$GO_VERSION" "$MIN_GO_VERSION" <<'PY'
@@ -115,4 +115,4 @@ cat > "$DIST/RELEASE-MANIFEST.json" <<EOF
 EOF
 normalize_mtime "$DIST"
 
-echo "Full KINGAIBOT v1.3 release written to $DIST"
+echo "Full KINGAIBOT v1.4 release written to $DIST"

@@ -17,6 +17,10 @@ type TaskRuntime interface {
 	Task(id string) (*task.Task, error)
 }
 
+type idempotentTaskRuntime interface {
+	CreateIdempotent(input string, meta map[string]any, key string) (*task.Task, error)
+}
+
 type BoundTaskRuntime struct {
 	base  TaskRuntime
 	store *Store
@@ -40,24 +44,50 @@ func copyMetadata(in map[string]any) map[string]any {
 	return out
 }
 
-func (b *BoundTaskRuntime) Create(input string, meta map[string]any) (*task.Task, error) {
-	meta = copyMetadata(meta)
+// bindTrustedMetadata removes any caller-supplied authority binding and derives
+// the effective authority exclusively from durable Agent identity state.
+func (b *BoundTaskRuntime) bindTrustedMetadata(in map[string]any) (map[string]any, error) {
+	meta := copyMetadata(in)
+	delete(meta, "authority_id")
 	agentID, _ := meta["agent_id"].(string)
 	agentID = strings.TrimSpace(agentID)
-	if agentID != "" {
-		grant, err := b.store.ActiveForSubject(agentID)
-		switch {
-		case err == nil:
-			meta["authority_id"] = grant.Envelope.ID
-		case errors.Is(err, os.ErrNotExist):
-			// An agent without a grant may still reason and perform capabilities
-			// that do not require authority-bound execution. Privileged cluster
-			// delegation will fail closed because no authority_id is present.
-		default:
-			return nil, fmt.Errorf("agent authority resolution failed: %w", err)
-		}
+	if agentID == "" {
+		return meta, nil
 	}
-	return b.base.Create(input, meta)
+	grant, err := b.store.ActiveForSubject(agentID)
+	switch {
+	case err == nil:
+		meta["authority_id"] = grant.Envelope.ID
+	case errors.Is(err, os.ErrNotExist):
+		// An agent without a grant may still reason and perform capabilities that
+		// do not require authority-bound execution. Privileged delegation fails
+		// closed later because no authority_id is present.
+	default:
+		return nil, fmt.Errorf("agent authority resolution failed: %w", err)
+	}
+	return meta, nil
+}
+
+func (b *BoundTaskRuntime) Create(input string, meta map[string]any) (*task.Task, error) {
+	bound, err := b.bindTrustedMetadata(meta)
+	if err != nil {
+		return nil, err
+	}
+	return b.base.Create(input, bound)
+}
+
+// CreateIdempotent preserves the same trusted authority derivation while
+// delegating stable task identity to a Runtime that explicitly supports it.
+func (b *BoundTaskRuntime) CreateIdempotent(input string, meta map[string]any, key string) (*task.Task, error) {
+	base, ok := b.base.(idempotentTaskRuntime)
+	if !ok {
+		return nil, errors.New("base task runtime does not support idempotent creation")
+	}
+	bound, err := b.bindTrustedMetadata(meta)
+	if err != nil {
+		return nil, err
+	}
+	return base.CreateIdempotent(input, bound, key)
 }
 
 func (b *BoundTaskRuntime) Task(id string) (*task.Task, error) {

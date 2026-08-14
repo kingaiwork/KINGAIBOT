@@ -109,6 +109,10 @@ func (s *Store) countLocked() (int, error) {
 	return n, nil
 }
 
+// CreateRoot persists a new grant as pending first. The grant is promoted to
+// active only after the authority.created audit event is durable. This ordering
+// ensures a crash between persistence and audit cannot expose unaudited
+// authority after restart.
 func (s *Store) CreateRoot(envelope Envelope) (*Grant, error) {
 	now := time.Now().UTC()
 	if err := envelope.Validate(now); err != nil {
@@ -119,26 +123,29 @@ func (s *Store) CreateRoot(envelope Envelope) (*Grant, error) {
 		return nil, err
 	}
 	envelope.ID = id
-	grant := &Grant{Envelope: envelope, Status: "active", CreatedAt: now, UpdatedAt: now}
+	grant := &Grant{Envelope: envelope, Status: "pending", CreatedAt: now, UpdatedAt: now}
 
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if n, countErr := s.countLocked(); countErr != nil {
-		s.mu.Unlock()
 		return nil, countErr
 	} else if n >= maxAuthorityGrants {
-		s.mu.Unlock()
 		return nil, errors.New("authority grant limit reached")
 	}
 	if err := s.saveLocked(grant); err != nil {
-		s.mu.Unlock()
 		return nil, err
 	}
 	path, _ := s.grantPath(id)
-	s.mu.Unlock()
-
 	if err := s.events.Append(eventlog.Event{Type: "authority.created", Data: map[string]any{"authority_id": id, "subject_id": envelope.SubjectID}}); err != nil {
 		_ = os.Remove(path)
 		return nil, fmt.Errorf("authority creation rolled back because audit failed: %w", err)
+	}
+	grant.Status = "active"
+	grant.UpdatedAt = time.Now().UTC()
+	if err := s.saveLocked(grant); err != nil {
+		// The previously persisted pending grant remains non-effective if the
+		// atomic promotion cannot be committed.
+		return nil, fmt.Errorf("authority was audited but activation persistence failed: %w", err)
 	}
 	return cloneGrant(grant)
 }
@@ -175,6 +182,9 @@ func (s *Store) List() ([]*Grant, error) {
 	return out, nil
 }
 
+// Derive follows the same audit-before-activation rule as CreateRoot. The
+// child remains pending and non-effective until the delegation audit is
+// durable, including across process crashes.
 func (s *Store) Derive(parentID string, child Envelope) (*Grant, error) {
 	now := time.Now().UTC()
 	s.mu.Lock()
@@ -196,7 +206,7 @@ func (s *Store) Derive(parentID string, child Envelope) (*Grant, error) {
 		return nil, err
 	}
 	derived.ID = id
-	grant := &Grant{Envelope: derived, ParentID: parent.Envelope.ID, Status: "active", CreatedAt: now, UpdatedAt: now}
+	grant := &Grant{Envelope: derived, ParentID: parent.Envelope.ID, Status: "pending", CreatedAt: now, UpdatedAt: now}
 	if n, countErr := s.countLocked(); countErr != nil {
 		return nil, countErr
 	} else if n >= maxAuthorityGrants {
@@ -210,9 +220,18 @@ func (s *Store) Derive(parentID string, child Envelope) (*Grant, error) {
 		_ = os.Remove(path)
 		return nil, fmt.Errorf("authority delegation rolled back because audit failed: %w", err)
 	}
+	grant.Status = "active"
+	grant.UpdatedAt = time.Now().UTC()
+	if err := s.saveLocked(grant); err != nil {
+		return nil, fmt.Errorf("authority delegation was audited but activation persistence failed: %w", err)
+	}
 	return cloneGrant(grant)
 }
 
+// Revoke is fail-closed. Revocation is persisted before audit and is never
+// rolled back to active merely because the audit sink is unhealthy. Returning
+// an error still tells the operator the evidence stream needs repair while the
+// authority remains safely unusable.
 func (s *Store) Revoke(id string) (*Grant, error) {
 	now := time.Now().UTC()
 	s.mu.Lock()
@@ -224,10 +243,6 @@ func (s *Store) Revoke(id string) (*Grant, error) {
 	if grant.Status != "active" {
 		return nil, errors.New("authority grant is not active")
 	}
-	original, err := cloneGrant(grant)
-	if err != nil {
-		return nil, err
-	}
 	grant.Status = "revoked"
 	grant.RevokedAt = &now
 	grant.UpdatedAt = now
@@ -235,10 +250,7 @@ func (s *Store) Revoke(id string) (*Grant, error) {
 		return nil, err
 	}
 	if err := s.events.Append(eventlog.Event{Type: "authority.revoked", Data: map[string]any{"authority_id": id, "subject_id": grant.Envelope.SubjectID}}); err != nil {
-		if rollbackErr := s.saveLocked(original); rollbackErr != nil {
-			return nil, fmt.Errorf("audit failed and authority rollback failed: audit=%v rollback=%w", err, rollbackErr)
-		}
-		return nil, fmt.Errorf("authority revocation rolled back because audit failed: %w", err)
+		return nil, fmt.Errorf("authority remains revoked but revocation audit failed: %w", err)
 	}
 	return cloneGrant(grant)
 }
@@ -268,7 +280,10 @@ func (s *Store) effectiveLocked(grant *Grant, now time.Time, seen map[string]str
 		return errors.New("authority parent cycle detected")
 	}
 	seen[id] = struct{}{}
-	if grant.Status != "active" || grant.RevokedAt != nil {
+	if grant.Status != "active" {
+		return errors.New("authority grant is not active")
+	}
+	if grant.RevokedAt != nil {
 		return errors.New("authority grant is revoked")
 	}
 	if err := grant.Envelope.Validate(now); err != nil {

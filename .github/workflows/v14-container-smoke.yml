@@ -1,8 +1,12 @@
-name: V1.3 Container Smoke
+name: V1.4 Container Smoke
 
 on:
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
