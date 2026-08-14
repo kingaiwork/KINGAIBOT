@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingaiwork/KINGAIBOT/internal/eventlog"
 	"github.com/kingaiwork/KINGAIBOT/internal/task"
 )
 
