@@ -37,20 +37,9 @@ func main() {
 		slog.Error("invalid API base", "error", err)
 		os.Exit(2)
 	}
-	proxy := newAPIProxy(base)
-	mux := http.NewServeMux()
-	mux.Handle("/ui/", platform.ControlCenterHandler())
-	mux.Handle("/v1/", proxy)
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		http.Redirect(w, r, "/ui/", http.StatusTemporaryRedirect)
-	})
 	srv := &http.Server{
 		Addr:              *listen,
-		Handler:           securityHeaders(mux),
+		Handler:           newConsoleHandler(base),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      150 * time.Second,
@@ -70,6 +59,31 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
+}
+
+// newConsoleHandler keeps every mounted route in the same ServeMux pattern
+// class. Go 1.22+ rejects ambiguous combinations such as a method-specific
+// "GET /" catch-all next to method-agnostic subtree mounts like "/ui/".
+// Method enforcement for the root redirect is therefore done inside the root
+// handler instead of in the pattern string.
+func newConsoleHandler(base string) http.Handler {
+	proxy := newAPIProxy(base)
+	mux := http.NewServeMux()
+	mux.Handle("/ui/", platform.ControlCenterHandler())
+	mux.Handle("/v1/", proxy)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		http.Redirect(w, r, "/ui/", http.StatusTemporaryRedirect)
+	})
+	return securityHeaders(mux)
 }
 
 func validateAPIBase(raw string) (string, error) {
