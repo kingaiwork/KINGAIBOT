@@ -8,4 +8,7 @@ FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build /out/kingconsole /usr/local/bin/kingconsole
 EXPOSE 18889
 ENTRYPOINT ["/usr/local/bin/kingconsole"]
-CMD ["-listen","0.0.0.0:18889","-api","http://kingagentd:18888"]
+# Safe standalone default: the UI can start without weakening the rule that
+# non-loopback upstream API targets require HTTPS. A separate-container
+# deployment must explicitly supply -api https://<trusted-kingagentd-endpoint>.
+CMD ["-listen","0.0.0.0:18889","-api","http://127.0.0.1:18888"]
