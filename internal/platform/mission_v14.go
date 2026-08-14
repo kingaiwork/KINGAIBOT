@@ -10,6 +10,7 @@ import (
 
 	"github.com/kingaiwork/KINGAIBOT/internal/memory"
 	"github.com/kingaiwork/KINGAIBOT/internal/storage"
+	"github.com/kingaiwork/KINGAIBOT/internal/task"
 )
 
 const missionDispatchStatusV14 = "dispatching_v14"
@@ -119,6 +120,28 @@ func (m *Manager) missionReconciliationV14(mission *Mission, index int, reason s
 	return mission, nil
 }
 
+func missionTaskRequiresReconciliation(status task.Status) bool {
+	return status == task.PendingAudit || status == task.Reconciliation
+}
+
+func (m *Manager) verifyMissionTaskV14(mission *Mission, index int) (*task.Task, error) {
+	if mission == nil || index < 0 || index >= len(mission.Tasks) {
+		return nil, errors.New("invalid mission task index")
+	}
+	taskID := strings.TrimSpace(mission.Tasks[index].TaskID)
+	if taskID == "" {
+		return nil, errors.New("mission task id missing")
+	}
+	current, err := m.rt.Task(taskID)
+	if err != nil {
+		return nil, err
+	}
+	if missionTaskRequiresReconciliation(current.Status) {
+		return current, fmt.Errorf("child task %s is %s", current.ID, current.Status)
+	}
+	return current, nil
+}
+
 func (m *Manager) resumeMissionDispatchV14(missionID string) (*Mission, error) {
 	idempotent, ok := m.rt.(idempotentPlatformRuntime)
 	if !ok {
@@ -143,6 +166,11 @@ func (m *Manager) resumeMissionDispatchV14(missionID string) (*Mission, error) {
 	}
 	for index, agentID := range agentIDs {
 		if mission.Tasks[index].TaskID != "" {
+			current, verifyErr := m.verifyMissionTaskV14(&mission, index)
+			if verifyErr != nil {
+				return m.missionReconciliationV14(&mission, index, "linked mission task requires reconciliation: "+verifyErr.Error())
+			}
+			mission.Tasks[index].Status = string(current.Status)
 			continue
 		}
 		prompt, err := m.missionPromptV14(mission.Objective, agentID)
@@ -170,6 +198,9 @@ func (m *Manager) resumeMissionDispatchV14(missionID string) (*Mission, error) {
 			// Recovery can safely re-run this slot because the Runtime task identity
 			// is deterministic for mission+slot+agent.
 			return nil, err
+		}
+		if missionTaskRequiresReconciliation(created.Status) {
+			return m.missionReconciliationV14(&mission, index, fmt.Sprintf("child task %s is %s", created.ID, created.Status))
 		}
 	}
 	if err := m.audit("mission.v14.dispatched", map[string]any{"mission_id": mission.ID, "tasks": len(mission.Tasks), "mode": mission.Mode}); err != nil {
