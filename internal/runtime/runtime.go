@@ -293,7 +293,7 @@ func (r *Runtime) process(id string) {
 }
 
 func (r *Runtime) Task(id string) (*task.Task, error) { return r.tasks.Get(id) }
-func (r *Runtime) Tasks() ([]*task.Task, error)        { return r.tasks.List() }
+func (r *Runtime) Tasks() ([]*task.Task, error)       { return r.tasks.List() }
 func (r *Runtime) Approvals() ([]*approval.Approval, error) {
 	return r.approvals.List()
 }

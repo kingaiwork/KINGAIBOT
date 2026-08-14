@@ -10,7 +10,7 @@ func minimalProviderConfig(t *testing.T, providerType string) *Config {
 	t.Helper()
 	dir := t.TempDir()
 	return &Config{
-		Server: Server{},
+		Server:  Server{},
 		Runtime: Runtime{DataDir: filepath.Join(dir, "data"), WorkspaceDir: filepath.Join(dir, "workspace")},
 		Providers: []Provider{{
 			Name:      "provider",
@@ -21,7 +21,7 @@ func minimalProviderConfig(t *testing.T, providerType string) *Config {
 			Enabled:   true,
 			APIKeyEnv: "TEST_PROVIDER_KEY",
 		}},
-		Security: Security{DefaultToolPolicy: "deny"},
+		Security:  Security{DefaultToolPolicy: "deny"},
 		Evolution: Evolution{Mode: "proposal-only"},
 	}
 }
