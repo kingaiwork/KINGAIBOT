@@ -51,10 +51,10 @@ type geminiTool struct {
 }
 
 type geminiRequest struct {
-	SystemInstruction *geminiContent `json:"systemInstruction,omitempty"`
+	SystemInstruction *geminiContent  `json:"systemInstruction,omitempty"`
 	Contents          []geminiContent `json:"contents"`
 	Tools             []geminiTool    `json:"tools,omitempty"`
-	GenerationConfig  map[string]any   `json:"generationConfig,omitempty"`
+	GenerationConfig  map[string]any  `json:"generationConfig,omitempty"`
 }
 
 type geminiResponse struct {
