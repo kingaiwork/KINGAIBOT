@@ -108,6 +108,23 @@ func (c *Coordinator) releaseAuthorityWork(jobID string) error {
 	return c.releaseAuthorityBindingWork(binding)
 }
 
+// ReleaseTerminalAuthorityWork is a recovery-only boundary for orchestration.
+// It derives authority from the durable Cluster binding, never from caller
+// input, and refuses to release capacity unless the job is provably terminal.
+func (c *Coordinator) ReleaseTerminalAuthorityWork(jobID string) error {
+	if c.authorityUsageController() == nil {
+		return nil
+	}
+	job, err := c.Job(jobID)
+	if err != nil {
+		return err
+	}
+	if job.Status != "completed" && job.Status != "failed" && job.Status != "cancelled" {
+		return errors.New("authority work may only be released for a terminal job")
+	}
+	return c.releaseAuthorityWork(jobID)
+}
+
 // SetHeldCost binds trusted per-attempt cost to an already-held job. The held
 // state guarantees no Worker can observe the job while the control plane is
 // attaching the budget. Cost may never be changed after activation.
