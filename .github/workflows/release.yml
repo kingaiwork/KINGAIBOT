@@ -77,7 +77,7 @@ jobs:
           KINGAGENT_MIN_RELEASE_GO: 1.26.6
         run: |
           ./scripts/build-release.sh
-          ./scripts/build-enterprise-bundles.sh
+          bash ./scripts/build-enterprise-bundles.sh
       - name: Attest public release provenance
         if: github.event.repository.visibility == 'public'
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
