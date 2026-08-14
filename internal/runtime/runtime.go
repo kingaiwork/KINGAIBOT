@@ -57,25 +57,47 @@ func New(ts *task.Store, as *approval.Store, el *eventlog.Log, ms *memory.Store,
 	return r
 }
 
+// Recover is deliberately asymmetric. Queued means execution had not been
+// claimed, so it is safe to enqueue again. Running means the process died after
+// execution began and external side effects may already have happened; those
+// tasks are moved to reconciliation and are never blindly replayed.
 func (r *Runtime) Recover() error {
 	ts, err := r.tasks.Recoverable()
 	if err != nil {
 		return err
 	}
 	for _, t := range ts {
-		_, er := r.tasks.Update(t.ID, func(x *task.Task) error {
-			if x.Status == task.Running || x.Status == task.Queued {
-				x.Status = task.Queued
-				x.Error = ""
+		switch t.Status {
+		case task.Running:
+			updated, er := r.tasks.Update(t.ID, func(x *task.Task) error {
+				if x.Status != task.Running {
+					return nil
+				}
+				x.Status = task.Reconciliation
+				x.Error = "process restarted while task was running; external side effects may be ambiguous"
 				x.PendingApproval = ""
+				return nil
+			})
+			if er != nil {
+				return er
 			}
-			return nil
-		})
-		if er != nil {
-			return er
-		}
-		if !r.enqueueBlocking(t.ID) {
-			return errors.New("runtime stopped during recovery")
+			if updated.Status == task.Reconciliation {
+				_ = r.events.Append(eventlog.Event{Type: "task.reconciliation_required", TaskID: t.ID, Data: map[string]any{"reason": "restart_during_running"}})
+			}
+		case task.Queued:
+			_, er := r.tasks.Update(t.ID, func(x *task.Task) error {
+				if x.Status == task.Queued {
+					x.Error = ""
+					x.PendingApproval = ""
+				}
+				return nil
+			})
+			if er != nil {
+				return er
+			}
+			if !r.enqueueBlocking(t.ID) {
+				return errors.New("runtime stopped during recovery")
+			}
 		}
 	}
 	return nil
@@ -283,7 +305,7 @@ func (r *Runtime) process(id string) {
 	}
 	defer r.release(id)
 	t, err := r.tasks.Get(id)
-	if err != nil || t.Status == task.Canceled || t.Status == task.Completed || t.Status == task.Failed || t.Status == task.WaitingApproval || t.Status == task.PendingAudit {
+	if err != nil || t.Status == task.Canceled || t.Status == task.Completed || t.Status == task.Failed || t.Status == task.WaitingApproval || t.Status == task.PendingAudit || t.Status == task.Reconciliation {
 		return
 	}
 	t, err = r.tasks.Update(id, func(x *task.Task) error {
