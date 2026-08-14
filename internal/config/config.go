@@ -266,11 +266,16 @@ func (c *Config) Normalize(base string) error {
 	}
 	sort.SliceStable(c.Providers, func(i, j int) bool { return c.Providers[i].Priority < c.Providers[j].Priority })
 	enabled := 0
-	for _, p := range c.Providers {
+	for i := range c.Providers {
+		p := &c.Providers[i]
 		if !p.Enabled {
 			continue
 		}
 		enabled++
+		p.Type = normalizeProviderType(p.Type)
+		if p.Type == "" {
+			return fmt.Errorf("provider %s has unsupported type", p.Name)
+		}
 		if p.Name == "" || p.BaseURL == "" || p.Model == "" {
 			return fmt.Errorf("enabled provider requires name, base_url and model")
 		}
@@ -293,7 +298,22 @@ func (c *Config) Normalize(base string) error {
 	}
 	return nil
 }
+
 func validPolicy(s string) bool { return s == "allow" || s == "ask" || s == "deny" }
+
+func normalizeProviderType(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "openai", "openai-compatible", "openai_compatible":
+		return "openai-compatible"
+	case "anthropic", "claude":
+		return "anthropic"
+	case "gemini", "google", "google-gemini":
+		return "gemini"
+	default:
+		return ""
+	}
+}
+
 func validateEndpointURL(raw string, allowHTTP bool) error {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -324,6 +344,7 @@ func validateEndpointURL(raw string, allowHTTP bool) error {
 	}
 	return errors.New("insecure http is permitted only for loopback endpoints")
 }
+
 func validateServerBaseURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -349,6 +370,7 @@ func validateServerBaseURL(raw string) error {
 	}
 	return errors.New("public base URL must use https; http is allowed only for loopback")
 }
+
 func abs(base, p string) string {
 	if filepath.IsAbs(p) {
 		return filepath.Clean(p)
