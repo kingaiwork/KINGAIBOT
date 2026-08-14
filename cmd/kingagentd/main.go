@@ -86,7 +86,9 @@ func main() {
 
 	ks, mustErr := knowledge.New(filepath.Join(cfg.Runtime.DataDir, "knowledge"), el)
 	must(mustErr)
-	tr.RegisterExtension(ks)
+	knowledgeExtension, mustErr := knowledge.NewSafeExtension(ks)
+	must(mustErr)
+	tr.RegisterExtension(knowledgeExtension)
 
 	cc, mustErr := cluster.New(filepath.Join(cfg.Runtime.DataDir, "cluster"), el)
 	must(mustErr)
@@ -176,7 +178,7 @@ func main() {
 
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "safe", "knowledge", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "safe", "knowledge", "safe", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
