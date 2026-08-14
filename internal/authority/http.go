@@ -44,8 +44,25 @@ func (s *Store) Handler() http.Handler {
 			writeAuthorityJSON(w, http.StatusOK, grant)
 			return
 		}
-		if len(parts) != 4 || r.Method != http.MethodPost {
+		if len(parts) != 4 {
 			http.NotFound(w, r)
+			return
+		}
+		if parts[3] == "usage" {
+			if r.Method != http.MethodGet {
+				writeAuthorityError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			usage, err := s.Usage(id)
+			if err != nil {
+				writeAuthorityStoreError(w, err)
+				return
+			}
+			writeAuthorityJSON(w, http.StatusOK, usage)
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeAuthorityError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 
@@ -144,6 +161,10 @@ func writeAuthorityStoreError(w http.ResponseWriter, err error) {
 		return
 	}
 	message := err.Error()
+	if strings.Contains(message, "budget exhausted") {
+		writeAuthorityError(w, http.StatusConflict, message)
+		return
+	}
 	if strings.Contains(message, "requires") ||
 		strings.Contains(message, "cannot") ||
 		strings.Contains(message, "invalid") ||
@@ -151,6 +172,7 @@ func writeAuthorityStoreError(w http.ResponseWriter, err error) {
 		strings.Contains(message, "exceed") ||
 		strings.Contains(message, "expired") ||
 		strings.Contains(message, "revoked") ||
+		strings.Contains(message, "not active") ||
 		strings.Contains(message, "delegation") ||
 		strings.Contains(message, "effective") {
 		writeAuthorityError(w, http.StatusBadRequest, message)
