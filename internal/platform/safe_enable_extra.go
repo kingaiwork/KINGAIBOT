@@ -1,9 +1,6 @@
 package platform
 
-import (
-	"errors"
-	"fmt"
-)
+import "fmt"
 
 func (m *Manager) SetWorkflowEnabledSafe(id string, enabled bool) (*Workflow, error) {
 	m.mu.Lock()
@@ -48,5 +45,3 @@ func (m *Manager) SetWorkflowEnabledSafe(id string, enabled bool) (*Workflow, er
 	}
 	return &workflow, nil
 }
-
-var _ = errors.New
