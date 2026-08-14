@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/kingaiwork/KINGAIBOT/internal/task"
 )
 
 func TestMissionV14DispatchesStableChildTasks(t *testing.T) {
@@ -91,6 +93,59 @@ func TestMissionV14RecoveryReusesOrphanedChildTask(t *testing.T) {
 	}
 	if recovered.Status != "completed" {
 		t.Fatalf("recovered mission did not complete: %#v", recovered)
+	}
+}
+
+func TestMissionV14RecoveryPropagatesChildReconciliation(t *testing.T) {
+	dir := t.TempDir()
+	runtime := newCallbackRuntime()
+	m := newManagerWithRuntimeForV14Test(t, dir, runtime)
+	missionID := "mission_child_reconciliation"
+	mission := &Mission{
+		ID:        missionID,
+		Objective: "ambiguous child",
+		AgentIDs:  []string{""},
+		Mode:      "parallel",
+		Status:    missionDispatchStatusV14,
+		Tasks:     []MissionTask{{Status: "pending"}},
+		CreatedAt: now(),
+		UpdatedAt: now(),
+	}
+	m.mu.Lock()
+	if err := m.save("missions", missionID, mission); err != nil {
+		m.mu.Unlock()
+		t.Fatal(err)
+	}
+	m.mu.Unlock()
+
+	key := missionTaskIdempotencyKey(missionID, 0, "")
+	preexisting, err := runtime.CreateIdempotent(mission.Objective, map[string]any{
+		"source":           "mission_v14",
+		"mission_id":       missionID,
+		"mission_task_idx": 0,
+		"agent_id":         "",
+	}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.mu.Lock()
+	runtime.tasks[preexisting.ID].Status = task.Reconciliation
+	runtime.tasks[preexisting.ID].Error = "ambiguous external side effect"
+	runtime.mu.Unlock()
+
+	m.RecoverMissionsV14()
+	recovered, err := m.Mission(missionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Status != "reconciliation" {
+		t.Fatalf("mission status=%s, want reconciliation: %#v", recovered.Status, recovered)
+	}
+	if len(recovered.Tasks) != 1 || recovered.Tasks[0].TaskID != preexisting.ID || recovered.Tasks[0].Status != "reconciliation" {
+		t.Fatalf("child reconciliation evidence not propagated: %#v", recovered.Tasks)
+	}
+	if runtime.next != 1 {
+		t.Fatalf("reconciliation recovery created duplicate work: count=%d", runtime.next)
 	}
 }
 
