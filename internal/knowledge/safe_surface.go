@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/kingaiwork/KINGAIBOT/internal/eventlog"
@@ -92,7 +93,7 @@ func (s *Store) CreateApprovedSafe(in Item, reviewNote string) (*Item, error) {
 // the Store lock. Two simultaneous reviewers can no longer both audit opposite
 // decisions against the same proposed version.
 func (s *Store) ReviewSafe(id, decision, note string) (*Item, error) {
-	decision = stringsLowerTrim(decision)
+	decision = strings.ToLower(strings.TrimSpace(memory.SanitizeContent(decision)))
 	if decision != "approved" && decision != "rejected" {
 		return nil, errors.New("decision must be approved or rejected")
 	}
@@ -123,33 +124,6 @@ func (s *Store) ReviewSafe(id, decision, note string) (*Item, error) {
 		return nil, fmt.Errorf("knowledge review was audited but state persistence failed: %w", err)
 	}
 	return cloneKnowledgeItem(&item)
-}
-
-func stringsLowerTrim(value string) string {
-	value = memory.SanitizeContent(value)
-	if len(value) > 64 {
-		value = value[:64]
-	}
-	return lowerTrim(value)
-}
-
-func lowerTrim(value string) string {
-	// Kept local so the safety surface does not change the canonical content hash
-	// helpers in the compatibility implementation.
-	return stringLowerTrim(value)
-}
-
-func stringLowerTrim(value string) string {
-	return normalizeDecision(value)
-}
-
-func normalizeDecision(value string) string {
-	// Split out for tests and future policy injection.
-	return trimLower(value)
-}
-
-func trimLower(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func cloneKnowledgeItem(item *Item) (*Item, error) {
