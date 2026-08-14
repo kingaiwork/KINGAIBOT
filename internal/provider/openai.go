@@ -165,7 +165,7 @@ func (c *Client) chatOpenAICompatible(ctx context.Context, p config.Provider, ke
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "KINGAIBOT/1.3")
+	req.Header.Set("User-Agent", "KINGAIBOT/1.4")
 	if key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
