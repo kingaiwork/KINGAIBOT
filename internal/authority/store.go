@@ -228,6 +228,10 @@ func (s *Store) Derive(parentID string, child Envelope) (*Grant, error) {
 	return cloneGrant(grant)
 }
 
+// Revoke is fail-closed. Revocation is persisted before audit and is never
+// rolled back to active merely because the audit sink is unhealthy. Returning
+// an error still tells the operator the evidence stream needs repair while the
+// authority remains safely unusable.
 func (s *Store) Revoke(id string) (*Grant, error) {
 	now := time.Now().UTC()
 	s.mu.Lock()
@@ -239,10 +243,6 @@ func (s *Store) Revoke(id string) (*Grant, error) {
 	if grant.Status != "active" {
 		return nil, errors.New("authority grant is not active")
 	}
-	original, err := cloneGrant(grant)
-	if err != nil {
-		return nil, err
-	}
 	grant.Status = "revoked"
 	grant.RevokedAt = &now
 	grant.UpdatedAt = now
@@ -250,10 +250,7 @@ func (s *Store) Revoke(id string) (*Grant, error) {
 		return nil, err
 	}
 	if err := s.events.Append(eventlog.Event{Type: "authority.revoked", Data: map[string]any{"authority_id": id, "subject_id": grant.Envelope.SubjectID}}); err != nil {
-		if rollbackErr := s.saveLocked(original); rollbackErr != nil {
-			return nil, fmt.Errorf("audit failed and authority rollback failed: audit=%v rollback=%w", err, rollbackErr)
-		}
-		return nil, fmt.Errorf("authority revocation rolled back because audit failed: %w", err)
+		return nil, fmt.Errorf("authority remains revoked but revocation audit failed: %w", err)
 	}
 	return cloneGrant(grant)
 }
