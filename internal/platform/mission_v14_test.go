@@ -16,7 +16,7 @@ func TestMissionV14DispatchesStableChildTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mission.Status != "running" || len(mission.Tasks) != 2 {
+	if mission.Status != missionRunningStatusV14 || len(mission.Tasks) != 2 {
 		t.Fatalf("unexpected dispatched mission: %#v", mission)
 	}
 	if runtime.next != 2 {
@@ -27,7 +27,7 @@ func TestMissionV14DispatchesStableChildTasks(t *testing.T) {
 			t.Fatalf("mission child %d missing task id", i)
 		}
 	}
-	finished, err := m.Mission(mission.ID)
+	finished, err := m.MissionV14(mission.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,10 +75,8 @@ func TestMissionV14RecoveryReusesOrphanedChildTask(t *testing.T) {
 		t.Fatalf("setup created %d runtime tasks, want 1", runtime.next)
 	}
 
-	// The Mission does not know about preexisting yet, simulating a crash after
-	// Runtime task creation but before the child TaskID was persisted.
 	m.RecoverMissionsV14()
-	recovered, err := m.Mission(missionID)
+	recovered, err := m.MissionV14(missionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +132,7 @@ func TestMissionV14RecoveryPropagatesChildReconciliation(t *testing.T) {
 	runtime.mu.Unlock()
 
 	m.RecoverMissionsV14()
-	recovered, err := m.Mission(missionID)
+	recovered, err := m.MissionV14(missionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +144,42 @@ func TestMissionV14RecoveryPropagatesChildReconciliation(t *testing.T) {
 	}
 	if runtime.next != 1 {
 		t.Fatalf("reconciliation recovery created duplicate work: count=%d", runtime.next)
+	}
+}
+
+func TestMissionV14RunningMissionPropagatesLaterChildReconciliation(t *testing.T) {
+	dir := t.TempDir()
+	runtime := newCallbackRuntime()
+	m := newManagerWithRuntimeForV14Test(t, dir, runtime)
+
+	// Use a child that starts non-terminal so the Mission reaches running_v14
+	// before ambiguity appears.
+	runtime.mu.Lock()
+	runtime.onCreate = nil
+	runtime.mu.Unlock()
+	mission, err := m.DispatchMissionV14(Mission{Objective: "later ambiguity", AgentIDs: []string{""}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mission.Status != missionRunningStatusV14 || len(mission.Tasks) != 1 {
+		t.Fatalf("unexpected initial mission: %#v", mission)
+	}
+	childID := mission.Tasks[0].TaskID
+	runtime.mu.Lock()
+	child := runtime.tasks[childID]
+	child.Status = task.Reconciliation
+	child.Error = "restart during external side effect"
+	runtime.mu.Unlock()
+
+	got, err := m.MissionV14(mission.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "reconciliation" {
+		t.Fatalf("mission remained %s after child reconciliation: %#v", got.Status, got)
+	}
+	if got.Tasks[0].Status != "reconciliation" || got.Tasks[0].TaskID != childID {
+		t.Fatalf("mission did not preserve child reconciliation evidence: %#v", got.Tasks)
 	}
 }
 
@@ -166,7 +200,7 @@ func TestV14ExtensionRoutesMissionToolToIdempotentDispatcher(t *testing.T) {
 	if err := json.Unmarshal([]byte(result), &mission); err != nil {
 		t.Fatal(err)
 	}
-	if len(mission.Tasks) != 1 || mission.Tasks[0].TaskID == "" || runtime.next != 1 {
+	if mission.Status != missionRunningStatusV14 || len(mission.Tasks) != 1 || mission.Tasks[0].TaskID == "" || runtime.next != 1 {
 		t.Fatalf("v1.4 extension did not use idempotent mission dispatcher: result=%#v count=%d", mission, runtime.next)
 	}
 }
