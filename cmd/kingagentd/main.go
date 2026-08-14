@@ -169,8 +169,9 @@ func main() {
 	orchestrationAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, orchestrator.Handler())
 	root.Handle("/v1/orchestration/", orchestrationAdmin)
 
-	// Channel-specific inbound authentication is enforced inside InboundHandler.
-	root.Handle("/v1/inbound/", pm.InboundHandler())
+	// Channel-specific inbound authentication and conservative retry semantics
+	// are enforced inside the crash-safe inbound gateway.
+	root.Handle("/v1/inbound/", pm.InboundHandlerSafe())
 	root.Handle("/", coreHandler)
 
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
