@@ -19,6 +19,39 @@ func TestValidateAPIBase(t *testing.T) {
 	}
 }
 
+func TestConsoleHandlerRootAndUIRoutesDoNotConflict(t *testing.T) {
+	var handler http.Handler
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				t.Fatalf("console handler registration panicked: %v", recovered)
+			}
+		}()
+		handler = newConsoleHandler("http://127.0.0.1:18888")
+	}()
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusTemporaryRedirect || rr.Header().Get("Location") != "/ui/" {
+		t.Fatalf("unexpected root response: status=%d location=%q", rr.Code, rr.Header().Get("Location"))
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/ui/", nil)
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "KINGAIBOT Control Center") {
+		t.Fatalf("control center route unavailable: status=%d body=%q", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/", nil)
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusMethodNotAllowed || rr.Header().Get("Allow") != "GET, HEAD" {
+		t.Fatalf("root method guard failed: status=%d allow=%q", rr.Code, rr.Header().Get("Allow"))
+	}
+}
+
 func TestConsoleProxyForwardsOnlySelectedHeaders(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/test" || r.URL.Query().Get("q") != "1" {
