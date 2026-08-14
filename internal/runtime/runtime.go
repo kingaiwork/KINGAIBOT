@@ -58,9 +58,10 @@ func New(ts *task.Store, as *approval.Store, el *eventlog.Log, ms *memory.Store,
 }
 
 // Recover is deliberately asymmetric. Queued means execution had not been
-// claimed, so it is safe to enqueue again. Running means the process died after
-// execution began and external side effects may already have happened; those
-// tasks are moved to reconciliation and are never blindly replayed.
+// claimed, so it is safe to enqueue again. Running/Completing means the process
+// died after execution began or after output was produced; external side effects
+// may already have happened, so those tasks require reconciliation and are never
+// blindly replayed.
 func (r *Runtime) Recover() error {
 	ts, err := r.tasks.Recoverable()
 	if err != nil {
@@ -68,13 +69,18 @@ func (r *Runtime) Recover() error {
 	}
 	for _, t := range ts {
 		switch t.Status {
-		case task.Running:
+		case task.Running, task.Completing:
+			previous := t.Status
 			updated, er := r.tasks.Update(t.ID, func(x *task.Task) error {
-				if x.Status != task.Running {
+				if x.Status != previous {
 					return nil
 				}
 				x.Status = task.Reconciliation
-				x.Error = "process restarted while task was running; external side effects may be ambiguous"
+				if previous == task.Completing {
+					x.Error = "process restarted while task completion was being committed; completion evidence is ambiguous"
+				} else {
+					x.Error = "process restarted while task was running; external side effects may be ambiguous"
+				}
 				x.PendingApproval = ""
 				return nil
 			})
@@ -82,7 +88,11 @@ func (r *Runtime) Recover() error {
 				return er
 			}
 			if updated.Status == task.Reconciliation {
-				_ = r.events.Append(eventlog.Event{Type: "task.reconciliation_required", TaskID: t.ID, Data: map[string]any{"reason": "restart_during_running"}})
+				reason := "restart_during_running"
+				if previous == task.Completing {
+					reason = "restart_during_completion"
+				}
+				_ = r.events.Append(eventlog.Event{Type: "task.reconciliation_required", TaskID: t.ID, Data: map[string]any{"reason": reason}})
 			}
 		case task.Queued:
 			_, er := r.tasks.Update(t.ID, func(x *task.Task) error {
@@ -305,7 +315,7 @@ func (r *Runtime) process(id string) {
 	}
 	defer r.release(id)
 	t, err := r.tasks.Get(id)
-	if err != nil || t.Status == task.Canceled || t.Status == task.Completed || t.Status == task.Failed || t.Status == task.WaitingApproval || t.Status == task.PendingAudit || t.Status == task.Reconciliation {
+	if err != nil || t.Status == task.Canceled || t.Status == task.Completed || t.Status == task.Failed || t.Status == task.WaitingApproval || t.Status == task.PendingAudit || t.Status == task.Completing || t.Status == task.Reconciliation {
 		return
 	}
 	t, err = r.tasks.Update(id, func(x *task.Task) error {
@@ -379,13 +389,48 @@ func (r *Runtime) process(id string) {
 		}
 		return
 	}
+
+	// Phase 1: persist the produced output as Completing. This is not yet trusted
+	// completion. A crash here is recovered as Reconciliation, not Completed.
 	_, err = r.tasks.Update(id, func(x *task.Task) error {
 		if x.Status == task.Canceled {
 			return errors.New("task canceled")
 		}
-		x.Status = task.Completed
+		if x.Status != task.Running {
+			return fmt.Errorf("task is not running")
+		}
+		x.Status = task.Completing
 		x.Output = out
 		x.Provider = providerName
+		x.Error = ""
+		return nil
+	})
+	if err != nil {
+		return
+	}
+	outputHash := sha256.Sum256([]byte(out))
+	completionData := map[string]any{
+		"provider":      providerName,
+		"output_sha256": hex.EncodeToString(outputHash[:]),
+	}
+	// Phase 2: completion evidence must be durable before Completed becomes
+	// visible. Audit failure leaves the output for inspection but marks the Task
+	// reconciliation-required rather than claiming success without evidence.
+	if auditErr := r.events.Append(eventlog.Event{Type: "task.completed", TaskID: id, Data: completionData}); auditErr != nil {
+		_, _ = r.tasks.Update(id, func(x *task.Task) error {
+			if x.Status == task.Completing {
+				x.Status = task.Reconciliation
+				x.Error = "completion audit unavailable; task output requires reconciliation"
+			}
+			return nil
+		})
+		return
+	}
+	_, err = r.tasks.Update(id, func(x *task.Task) error {
+		if x.Status != task.Completing {
+			return errors.New("task is not completing")
+		}
+		x.Status = task.Completed
 		x.Error = ""
 		return nil
 	})
@@ -395,7 +440,6 @@ func (r *Runtime) process(id string) {
 	if r.cfg.Memory.Enabled && r.memory != nil && r.cfg.Memory.StoreTaskOutputs {
 		_ = r.memory.Add(memory.Record{Kind: "episodic", Content: out, Source: "task:" + id, Importance: 0.5, Confidence: 0.8})
 	}
-	_ = r.events.Append(eventlog.Event{Type: "task.completed", TaskID: id, Data: map[string]any{"provider": providerName}})
 }
 
 func (r *Runtime) Task(id string) (*task.Task, error) { return r.tasks.Get(id) }
@@ -410,6 +454,8 @@ func (r *Runtime) Cancel(id string) error {
 		switch t.Status {
 		case task.Completed, task.Failed, task.Canceled:
 			return errors.New("task already terminal")
+		case task.Completing, task.Reconciliation:
+			return errors.New("task has ambiguous side effects and requires reconciliation")
 		}
 		t.Status = task.Canceled
 		t.PendingApproval = ""
