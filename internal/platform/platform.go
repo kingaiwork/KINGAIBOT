@@ -166,15 +166,15 @@ type Channel struct {
 }
 
 type Skill struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description,omitempty"`
-	Instructions   string    `json:"instructions"`
-	Tools          []string  `json:"tools,omitempty"`
-	Enabled        bool      `json:"enabled"`
-	ContentSHA256  string    `json:"content_sha256"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Description   string    `json:"description,omitempty"`
+	Instructions  string    `json:"instructions"`
+	Tools         []string  `json:"tools,omitempty"`
+	Enabled       bool      `json:"enabled"`
+	ContentSHA256 string    `json:"content_sha256"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type MissionTask struct {
@@ -198,17 +198,17 @@ type Mission struct {
 }
 
 type Manager struct {
-	dir      string
-	rt       TaskRuntime
-	events   *eventlog.Log
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	mu       sync.RWMutex
-	runMu    sync.Mutex
-	running  map[string]bool
-	tick     time.Duration
-	offline  time.Duration
+	dir     string
+	rt      TaskRuntime
+	events  *eventlog.Log
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	mu      sync.RWMutex
+	runMu   sync.Mutex
+	running map[string]bool
+	tick    time.Duration
+	offline time.Duration
 }
 
 func New(dir string, rt TaskRuntime, events *eventlog.Log) (*Manager, error) {
@@ -1226,39 +1226,87 @@ func (m *Manager) ToolDefinitions() []provider.ToolDef {
 func (m *Manager) ExecuteTool(ctx context.Context, _ string, name string, args json.RawMessage) (string, error) {
 	switch name {
 	case "platform_agents_list":
-		v, err := m.Agents(); return marshalResult(v, err)
+		v, err := m.Agents()
+		return marshalResult(v, err)
 	case "platform_skills_list":
-		v, err := m.Skills(); return marshalResult(v, err)
+		v, err := m.Skills()
+		return marshalResult(v, err)
 	case "platform_nodes_list":
-		v, err := m.Nodes(); return marshalResult(v, err)
+		v, err := m.Nodes()
+		return marshalResult(v, err)
 	case "platform_schedule_create":
 		var in Schedule
-		if err := json.Unmarshal(args, &in); err != nil { return "", err }
-		v, err := m.CreateSchedule(in); return marshalResult(v, err)
+		if err := json.Unmarshal(args, &in); err != nil {
+			return "", err
+		}
+		v, err := m.CreateSchedule(in)
+		return marshalResult(v, err)
 	case "platform_mission_dispatch":
 		var in Mission
-		if err := json.Unmarshal(args, &in); err != nil { return "", err }
-		v, err := m.DispatchMission(in); return marshalResult(v, err)
+		if err := json.Unmarshal(args, &in); err != nil {
+			return "", err
+		}
+		v, err := m.DispatchMission(in)
+		return marshalResult(v, err)
 	case "platform_plugin_call":
-		var in struct { PluginID string `json:"plugin_id"`; Method string `json:"method"`; Input any `json:"input"` }
-		if err := json.Unmarshal(args, &in); err != nil { return "", err }
-		m.mu.RLock(); var p Plugin; err := m.read("plugins", in.PluginID, &p); m.mu.RUnlock()
-		if err != nil { return "", err }
-		if !p.Enabled { return "", errors.New("plugin disabled") }
+		var in struct {
+			PluginID string `json:"plugin_id"`
+			Method   string `json:"method"`
+			Input    any    `json:"input"`
+		}
+		if err := json.Unmarshal(args, &in); err != nil {
+			return "", err
+		}
+		m.mu.RLock()
+		var p Plugin
+		err := m.read("plugins", in.PluginID, &p)
+		m.mu.RUnlock()
+		if err != nil {
+			return "", err
+		}
+		if !p.Enabled {
+			return "", errors.New("plugin disabled")
+		}
 		return m.remotePOST(ctx, p.Endpoint, p.BearerTokenEnv, p.AllowPrivateNetwork, map[string]any{"method": in.Method, "input": in.Input, "plugin_id": p.ID})
 	case "platform_channel_send":
-		var in struct { ChannelID string `json:"channel_id"`; Recipient string `json:"recipient"`; Text string `json:"text"` }
-		if err := json.Unmarshal(args, &in); err != nil { return "", err }
-		m.mu.RLock(); var c Channel; err := m.read("channels", in.ChannelID, &c); m.mu.RUnlock()
-		if err != nil { return "", err }
-		if !c.Enabled { return "", errors.New("channel disabled") }
+		var in struct {
+			ChannelID string `json:"channel_id"`
+			Recipient string `json:"recipient"`
+			Text      string `json:"text"`
+		}
+		if err := json.Unmarshal(args, &in); err != nil {
+			return "", err
+		}
+		m.mu.RLock()
+		var c Channel
+		err := m.read("channels", in.ChannelID, &c)
+		m.mu.RUnlock()
+		if err != nil {
+			return "", err
+		}
+		if !c.Enabled {
+			return "", errors.New("channel disabled")
+		}
 		return m.remotePOST(ctx, c.Endpoint, c.BearerTokenEnv, c.AllowPrivateNetwork, map[string]any{"recipient": in.Recipient, "text": in.Text, "channel_id": c.ID, "kind": c.Kind})
 	case "platform_node_action":
-		var in struct { NodeID string `json:"node_id"`; Action string `json:"action"`; Input any `json:"input"` }
-		if err := json.Unmarshal(args, &in); err != nil { return "", err }
-		m.mu.RLock(); var n Node; err := m.read("nodes", in.NodeID, &n); m.mu.RUnlock()
-		if err != nil { return "", err }
-		if n.Endpoint == "" { return "", errors.New("node has no remote endpoint") }
+		var in struct {
+			NodeID string `json:"node_id"`
+			Action string `json:"action"`
+			Input  any    `json:"input"`
+		}
+		if err := json.Unmarshal(args, &in); err != nil {
+			return "", err
+		}
+		m.mu.RLock()
+		var n Node
+		err := m.read("nodes", in.NodeID, &n)
+		m.mu.RUnlock()
+		if err != nil {
+			return "", err
+		}
+		if n.Endpoint == "" {
+			return "", errors.New("node has no remote endpoint")
+		}
 		return m.remotePOST(ctx, n.Endpoint, n.BearerTokenEnv, n.AllowPrivateNetwork, map[string]any{"action": in.Action, "input": in.Input, "node_id": n.ID})
 	default:
 		return "", errors.New("unknown platform tool")

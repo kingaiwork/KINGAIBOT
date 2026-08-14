@@ -73,7 +73,7 @@ func (r *Registry) findExtension(name string) Extension {
 			if d.Function.Name == name {
 				return ext
 			}
-	}
+		}
 	}
 	return nil
 }

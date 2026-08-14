@@ -46,7 +46,7 @@ func (m *Manager) Handler() http.Handler {
 func (m *Manager) httpCapabilities(w http.ResponseWriter, _ *http.Request) {
 	writePlatformJSON(w, http.StatusOK, map[string]any{
 		"platform": "KINGAIBOT Platform Control Plane",
-		"version": "1.3",
+		"version":  "1.3",
 		"capabilities": []string{
 			"durable_sessions", "agent_profiles", "recurring_schedules", "durable_workflows",
 			"parallel_multi_agent_missions", "device_nodes", "remote_plugins", "channel_adapters",
@@ -63,7 +63,9 @@ func (m *Manager) httpAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in AgentProfile
-	if !decodePlatform(w, r, &in) { return }
+	if !decodePlatform(w, r, &in) {
+		return
+	}
 	v, err := m.CreateAgent(in)
 	respondCreated(w, v, err)
 }
@@ -75,7 +77,9 @@ func (m *Manager) httpSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in Session
-	if !decodePlatform(w, r, &in) { return }
+	if !decodePlatform(w, r, &in) {
+		return
+	}
 	v, err := m.CreateSession(in)
 	respondCreated(w, v, err)
 }
@@ -86,10 +90,17 @@ func (m *Manager) httpSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) httpSessionMessage(w http.ResponseWriter, r *http.Request) {
-	var in struct { Message string `json:"message"` }
-	if !decodePlatform(w, r, &in) { return }
+	var in struct {
+		Message string `json:"message"`
+	}
+	if !decodePlatform(w, r, &in) {
+		return
+	}
 	v, err := m.SendSession(r.PathValue("id"), in.Message)
-	if err != nil { platformProblem(w, err); return }
+	if err != nil {
+		platformProblem(w, err)
+		return
+	}
 	writePlatformJSON(w, http.StatusAccepted, v)
 }
 
@@ -100,16 +111,22 @@ func (m *Manager) httpSchedules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in Schedule
-	if !decodePlatform(w, r, &in) { return }
+	if !decodePlatform(w, r, &in) {
+		return
+	}
 	v, err := m.CreateSchedule(in)
 	respondCreated(w, v, err)
 }
 
 func (m *Manager) httpScheduleEnabled(w http.ResponseWriter, r *http.Request) {
-	var in struct { Enabled *bool `json:"enabled"` }
-	if !decodePlatform(w, r, &in) { return }
+	var in struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if !decodePlatform(w, r, &in) {
+		return
+	}
 	if in.Enabled == nil {
-		writePlatformJSON(w, http.StatusBadRequest, map[string]any{"error":"enabled_required"})
+		writePlatformJSON(w, http.StatusBadRequest, map[string]any{"error": "enabled_required"})
 		return
 	}
 	v, err := m.SetScheduleEnabled(r.PathValue("id"), *in.Enabled)
@@ -123,14 +140,19 @@ func (m *Manager) httpWorkflows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in Workflow
-	if !decodePlatform(w, r, &in) { return }
+	if !decodePlatform(w, r, &in) {
+		return
+	}
 	v, err := m.CreateWorkflow(in)
 	respondCreated(w, v, err)
 }
 
 func (m *Manager) httpWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	v, err := m.RunWorkflow(r.PathValue("id"))
-	if err != nil { platformProblem(w, err); return }
+	if err != nil {
+		platformProblem(w, err)
+		return
+	}
 	writePlatformJSON(w, http.StatusAccepted, v)
 }
 
@@ -146,14 +168,20 @@ func (m *Manager) httpNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in Node
-	if !decodePlatform(w, r, &in) { return }
+	if !decodePlatform(w, r, &in) {
+		return
+	}
 	v, err := m.CreateNode(in)
 	respondCreated(w, v, err)
 }
 
 func (m *Manager) httpNodeHeartbeat(w http.ResponseWriter, r *http.Request) {
-	var in struct { Metadata map[string]any `json:"metadata"` }
-	if !decodePlatform(w, r, &in) { return }
+	var in struct {
+		Metadata map[string]any `json:"metadata"`
+	}
+	if !decodePlatform(w, r, &in) {
+		return
+	}
 	v, err := m.HeartbeatNode(r.PathValue("id"), in.Metadata)
 	respondPlatform(w, v, err)
 }
@@ -165,7 +193,9 @@ func (m *Manager) httpPlugins(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in Plugin
-	if !decodePlatform(w, r, &in) { return }
+	if !decodePlatform(w, r, &in) {
+		return
+	}
 	v, err := m.CreatePlugin(in)
 	respondCreated(w, v, err)
 }
@@ -177,7 +207,9 @@ func (m *Manager) httpChannels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in Channel
-	if !decodePlatform(w, r, &in) { return }
+	if !decodePlatform(w, r, &in) {
+		return
+	}
 	v, err := m.CreateChannel(in)
 	respondCreated(w, v, err)
 }
@@ -189,7 +221,9 @@ func (m *Manager) httpSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in Skill
-	if !decodePlatform(w, r, &in) { return }
+	if !decodePlatform(w, r, &in) {
+		return
+	}
 	v, err := m.CreateSkill(in)
 	respondCreated(w, v, err)
 }
@@ -201,9 +235,14 @@ func (m *Manager) httpMissions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in Mission
-	if !decodePlatform(w, r, &in) { return }
+	if !decodePlatform(w, r, &in) {
+		return
+	}
 	v, err := m.DispatchMission(in)
-	if err != nil { platformProblem(w, err); return }
+	if err != nil {
+		platformProblem(w, err)
+		return
+	}
 	writePlatformJSON(w, http.StatusAccepted, v)
 }
 
@@ -217,23 +256,29 @@ func decodePlatform(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		writePlatformJSON(w, http.StatusBadRequest, map[string]any{"error":"invalid_json", "detail": err.Error()})
+		writePlatformJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json", "detail": err.Error()})
 		return false
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		writePlatformJSON(w, http.StatusBadRequest, map[string]any{"error":"invalid_json", "detail":"only one JSON object is allowed"})
+		writePlatformJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json", "detail": "only one JSON object is allowed"})
 		return false
 	}
 	return true
 }
 
 func respondCreated(w http.ResponseWriter, v any, err error) {
-	if err != nil { platformProblem(w, err); return }
+	if err != nil {
+		platformProblem(w, err)
+		return
+	}
 	writePlatformJSON(w, http.StatusCreated, v)
 }
 
 func respondPlatform(w http.ResponseWriter, v any, err error) {
-	if err != nil { platformProblem(w, err); return }
+	if err != nil {
+		platformProblem(w, err)
+		return
+	}
 	writePlatformJSON(w, http.StatusOK, v)
 }
 

@@ -45,9 +45,13 @@ func newManagerForTest(t *testing.T) *Manager {
 	t.Helper()
 	dir := t.TempDir()
 	el, err := eventlog.New(dir + "/events")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	m, err := New(dir+"/platform", newFakeRuntime(), el)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(m.Close)
 	return m
 }
@@ -55,37 +59,61 @@ func newManagerForTest(t *testing.T) *Manager {
 func TestAgentSessionAndMission(t *testing.T) {
 	m := newManagerForTest(t)
 	a, err := m.CreateAgent(AgentProfile{Name: "researcher", SystemPrompt: "Be concise."})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	s, err := m.CreateSession(Session{AgentID: a.ID, Channel: "web", Sender: "owner"})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	created, err := m.SendSession(s.ID, "hello")
-	if err != nil { t.Fatal(err) }
-	if created.Status != task.Completed { t.Fatalf("unexpected task status: %s", created.Status) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Status != task.Completed {
+		t.Fatalf("unexpected task status: %s", created.Status)
+	}
 	got, err := m.Session(s.ID)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got.Turns) != 1 || got.Turns[0].Assistant == "" || got.Turns[0].DoneAt == nil {
 		t.Fatalf("session did not synchronize task result: %#v", got.Turns)
 	}
 	mission, err := m.DispatchMission(Mission{Objective: "check system", AgentIDs: []string{a.ID}})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	mission, err = m.Mission(mission.ID)
-	if err != nil { t.Fatal(err) }
-	if mission.Status != "completed" { t.Fatalf("unexpected mission status: %s", mission.Status) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mission.Status != "completed" {
+		t.Fatalf("unexpected mission status: %s", mission.Status)
+	}
 }
 
 func TestWorkflowRunsToCompletion(t *testing.T) {
 	m := newManagerForTest(t)
 	wf, err := m.CreateWorkflow(Workflow{Name: "two-step", Steps: []WorkflowStep{{Prompt: "one"}, {Prompt: "two"}}})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	run, err := m.RunWorkflow(wf.ID)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		runs, er := m.WorkflowRuns()
-		if er != nil { t.Fatal(er) }
+		if er != nil {
+			t.Fatal(er)
+		}
 		for _, r := range runs {
 			if r.ID == run.ID && r.Status == "completed" {
-				if len(r.TaskIDs) != 2 || len(r.Outputs) != 2 { t.Fatalf("unexpected run: %#v", r) }
+				if len(r.TaskIDs) != 2 || len(r.Outputs) != 2 {
+					t.Fatalf("unexpected run: %#v", r)
+				}
 				return
 			}
 		}
@@ -110,6 +138,10 @@ func TestScheduleBounds(t *testing.T) {
 		t.Fatal("expected sub-minute schedule rejection")
 	}
 	s, err := m.CreateSchedule(Schedule{Name: "hourly", Prompt: "x", IntervalSeconds: 3600})
-	if err != nil { t.Fatal(err) }
-	if !s.Enabled || s.NextRunAt.IsZero() { t.Fatalf("invalid schedule: %#v", s) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Enabled || s.NextRunAt.IsZero() {
+		t.Fatalf("invalid schedule: %#v", s)
+	}
 }
