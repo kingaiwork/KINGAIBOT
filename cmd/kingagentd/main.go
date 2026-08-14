@@ -108,8 +108,13 @@ func main() {
 
 	must(rt.Recover())
 
-	coreHandler := api.New(cfg, rt, tr).Handler()
+	coreServer := api.New(cfg, rt, tr)
+	coreHandler := coreServer.Handler()
 	root := http.NewServeMux()
+
+	// Runtime reconciliation is an exact admin-only route. It is intentionally
+	// outside MCP/A2A/model tools: ambiguous side effects require operator review.
+	root.Handle("POST /v1/tasks/{id}/reconcile", coreServer.TaskReconciliationHandler())
 
 	// Scoped platform API: legacy admin secret remains accepted, while durable
 	// access keys are evaluated against the path-level read/write/automation/admin
