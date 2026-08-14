@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	rootRateLimit  = 600
-	rootRateWindow = time.Minute
+	rootRateLimit      = 600
+	rootRateWindow     = time.Minute
+	rootRateMaxEntries = 8192
 )
 
 type rootRateEntry struct {
@@ -41,21 +42,35 @@ func remoteKey(r *http.Request) string {
 func (l *rootLimiter) allow(key string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	entry := l.entries[key]
-	if entry.WindowStart.IsZero() || now.Sub(entry.WindowStart) >= rootRateWindow {
-		entry = rootRateEntry{WindowStart: now, Count: 0}
-	}
-	entry.Count++
-	l.entries[key] = entry
-	// Opportunistic bounded cleanup avoids an attacker growing the map forever.
-	if len(l.entries) > 4096 {
+
+	entry, exists := l.entries[key]
+	if !exists && len(l.entries) >= rootRateMaxEntries {
 		cutoff := now.Add(-2 * rootRateWindow)
 		for k, v := range l.entries {
 			if v.WindowStart.Before(cutoff) {
 				delete(l.entries, k)
 			}
 		}
+		if len(l.entries) >= rootRateMaxEntries {
+			oldestKey := ""
+			var oldest time.Time
+			for k, v := range l.entries {
+				if oldestKey == "" || v.WindowStart.Before(oldest) {
+					oldestKey = k
+					oldest = v.WindowStart
+				}
+			}
+			if oldestKey != "" {
+				delete(l.entries, oldestKey)
+			}
+		}
 	}
+
+	if entry.WindowStart.IsZero() || now.Sub(entry.WindowStart) >= rootRateWindow {
+		entry = rootRateEntry{WindowStart: now, Count: 0}
+	}
+	entry.Count++
+	l.entries[key] = entry
 	return entry.Count <= rootRateLimit
 }
 
