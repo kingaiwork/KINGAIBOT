@@ -4,6 +4,6 @@
 *.env
 .env
 .DS_Store
-kingagent
-kingagentd
+/kingagent
+/kingagentd
 *.exe
