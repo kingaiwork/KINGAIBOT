@@ -2,8 +2,11 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,8 +22,10 @@ import (
 )
 
 var (
-	ErrInvalidTaskInput = errors.New("invalid task input")
-	ErrQueueUnavailable = errors.New("runtime queue unavailable")
+	ErrInvalidTaskInput    = errors.New("invalid task input")
+	ErrQueueUnavailable    = errors.New("runtime queue unavailable")
+	ErrIdempotencyPending  = errors.New("idempotent task is pending audit reconciliation")
+	ErrIdempotencyConflict = errors.New("idempotency key conflicts with existing task input")
 )
 
 type Runtime struct {
@@ -86,27 +91,48 @@ func (r *Runtime) Close() {
 	r.wg.Wait()
 }
 
-func (r *Runtime) Create(input string, meta map[string]any) (*task.Task, error) {
+func (r *Runtime) validateCreateInput(input string) error {
 	if input == "" {
-		return nil, fmt.Errorf("%w: input required", ErrInvalidTaskInput)
+		return fmt.Errorf("%w: input required", ErrInvalidTaskInput)
 	}
 	if len(input) > int(r.cfg.Runtime.MaxRequestBytes) {
-		return nil, fmt.Errorf("%w: input exceeds configured limit", ErrInvalidTaskInput)
+		return fmt.Errorf("%w: input exceeds configured limit", ErrInvalidTaskInput)
 	}
-	id, err := storage.RandomID("task")
-	if err != nil {
-		return nil, err
+	return nil
+}
+
+func copyTaskMetadata(meta map[string]any) map[string]any {
+	if meta == nil {
+		return map[string]any{}
 	}
-	t := &task.Task{ID: id, Input: input, Status: task.Queued, Metadata: meta}
-	if err := r.tasks.Save(t); err != nil {
-		return nil, err
+	out := make(map[string]any, len(meta)+2)
+	for k, v := range meta {
+		out[k] = v
 	}
-	if err := r.events.Append(eventlog.Event{Type: "task.created", TaskID: t.ID}); err != nil {
+	return out
+}
+
+// activateNewTask enforces audit-before-queue. A crash before the task.created
+// audit leaves PendingAudit state, which Recover deliberately ignores. A crash
+// after the audited transition to Queued is recoverable and safe to enqueue.
+func (r *Runtime) activateNewTask(t *task.Task, eventData map[string]any) (*task.Task, error) {
+	if err := r.events.Append(eventlog.Event{Type: "task.created", TaskID: t.ID, Data: eventData}); err != nil {
 		_, _ = r.tasks.Update(t.ID, func(x *task.Task) error {
 			x.Status = task.Failed
 			x.Error = "audit log unavailable; task was not scheduled"
 			return nil
 		})
+		return nil, err
+	}
+	queued, err := r.tasks.Update(t.ID, func(x *task.Task) error {
+		if x.Status != task.PendingAudit {
+			return errors.New("task is not pending audit")
+		}
+		x.Status = task.Queued
+		x.Error = ""
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	if !r.enqueue(t.ID) {
@@ -118,7 +144,66 @@ func (r *Runtime) Create(input string, meta map[string]any) (*task.Task, error) 
 		_ = r.events.Append(eventlog.Event{Type: "task.rejected", TaskID: t.ID, Data: map[string]any{"reason": "queue_unavailable"}})
 		return nil, ErrQueueUnavailable
 	}
-	return t, nil
+	return queued, nil
+}
+
+func (r *Runtime) Create(input string, meta map[string]any) (*task.Task, error) {
+	if err := r.validateCreateInput(input); err != nil {
+		return nil, err
+	}
+	id, err := storage.RandomID("task")
+	if err != nil {
+		return nil, err
+	}
+	t := &task.Task{ID: id, Input: input, Status: task.PendingAudit, Metadata: copyTaskMetadata(meta)}
+	if err := r.tasks.Save(t); err != nil {
+		return nil, err
+	}
+	return r.activateNewTask(t, nil)
+}
+
+// CreateIdempotent creates at most one durable Task for a stable caller-owned
+// key. The raw key is never persisted; its SHA-256 digest determines the Task ID
+// and is stored with an input digest for conflict detection. Repeated calls
+// return the existing Task instead of scheduling duplicate work.
+func (r *Runtime) CreateIdempotent(input string, meta map[string]any, key string) (*task.Task, error) {
+	if err := r.validateCreateInput(input); err != nil {
+		return nil, err
+	}
+	key = strings.TrimSpace(key)
+	if key == "" || len(key) > 512 {
+		return nil, errors.New("idempotency key required and must not exceed 512 bytes")
+	}
+	keyHash := sha256.Sum256([]byte(key))
+	keyDigest := hex.EncodeToString(keyHash[:])
+	inputHash := sha256.Sum256([]byte(input))
+	inputDigest := hex.EncodeToString(inputHash[:])
+	id := "task_idem_" + keyDigest[:32]
+
+	metadata := copyTaskMetadata(meta)
+	metadata["idempotency_key_sha256"] = keyDigest
+	metadata["idempotency_input_sha256"] = inputDigest
+	t := &task.Task{ID: id, Input: input, Status: task.PendingAudit, Metadata: metadata}
+	created, err := r.tasks.SaveIfAbsent(t)
+	if err != nil {
+		return nil, err
+	}
+	if !created {
+		existing, err := r.tasks.Get(id)
+		if err != nil {
+			return nil, err
+		}
+		existingKey, _ := existing.Metadata["idempotency_key_sha256"].(string)
+		existingInput, _ := existing.Metadata["idempotency_input_sha256"].(string)
+		if existingKey != keyDigest || existingInput != inputDigest {
+			return nil, ErrIdempotencyConflict
+		}
+		if existing.Status == task.PendingAudit {
+			return nil, ErrIdempotencyPending
+		}
+		return existing, nil
+	}
+	return r.activateNewTask(t, map[string]any{"idempotency_key_sha256": keyDigest})
 }
 
 func (r *Runtime) enqueue(id string) bool {
@@ -198,7 +283,7 @@ func (r *Runtime) process(id string) {
 	}
 	defer r.release(id)
 	t, err := r.tasks.Get(id)
-	if err != nil || t.Status == task.Canceled || t.Status == task.Completed || t.Status == task.Failed || t.Status == task.WaitingApproval {
+	if err != nil || t.Status == task.Canceled || t.Status == task.Completed || t.Status == task.Failed || t.Status == task.WaitingApproval || t.Status == task.PendingAudit {
 		return
 	}
 	t, err = r.tasks.Update(id, func(x *task.Task) error {
