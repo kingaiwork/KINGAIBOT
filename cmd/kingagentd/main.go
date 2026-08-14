@@ -93,9 +93,6 @@ func main() {
 	cc, mustErr := cluster.New(filepath.Join(cfg.Runtime.DataDir, "cluster"), el)
 	must(mustErr)
 	must(cc.SetAuthorityChecker(authorityStore))
-	must(mustErr)
-	taskAuthorityResolver, mustErr = authority.NewTaskAuthorityResolver(ts)
-	must(mustErr)
 	must(cc.SetTaskAuthorityResolver(taskAuthorityResolver))
 	tr.RegisterExtension(cc)
 
