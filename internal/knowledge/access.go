@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"sync"
@@ -109,8 +110,12 @@ func strictDecode(w http.ResponseWriter, r *http.Request, dst any) error {
 		return err
 	}
 	var extra any
-	if err := dec.Decode(&extra); err == nil {
-		err := errors.New("only one JSON object is allowed")
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			err = errors.New("only one JSON object is allowed")
+		} else {
+			err = fmt.Errorf("invalid trailing JSON: %w", err)
+		}
 		write(w, nil, err, http.StatusBadRequest)
 		return err
 	}
