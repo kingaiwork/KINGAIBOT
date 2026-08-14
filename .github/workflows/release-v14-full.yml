@@ -1,0 +1,86 @@
+name: V1.4 Full Release Assets
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+jobs:
+  full-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.6'
+          cache: true
+      - name: Validate tag or dispatch ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9._-]+)?$ ]] || {
+              echo "Release tag must be vMAJOR.MINOR.PATCH" >&2
+              exit 2
+            }
+          fi
+      - name: Security gate
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -race -count=1 ./...
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          govulncheck ./...
+      - name: Build full six-target package set
+        env:
+          VERSION: ${{ github.ref_name }}
+          KINGAGENT_MIN_RELEASE_GO: 1.26.6
+        run: |
+          chmod +x scripts/build-release-v14.sh
+          ./scripts/build-release-v14.sh
+      - name: Attest public release provenance
+        if: github.event.repository.visibility == 'public'
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d
+        with:
+          subject-path: |
+            dist-v14/kingaibot_*.tar.gz
+            dist-v14/kingaibot_*.zip
+            dist-v14/sbom.cdx.json
+            dist-v14/SHA256SUMS
+            dist-v14/RELEASE-MANIFEST.json
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      - name: Sign full release assets with GitHub OIDC
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          for f in dist-v14/kingaibot_* dist-v14/sbom.cdx.json dist-v14/SHA256SUMS dist-v14/RELEASE-MANIFEST.json; do
+            cosign sign-blob --yes --bundle "${f}.sigstore.json" "$f"
+          done
+      - name: Publish or augment GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --verify-tag --generate-notes --title "KINGAIBOT $tag"
+          fi
+          gh release upload "$tag" dist-v14/* --clobber
+      - name: Upload validation artifact on manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kingaibot-full-${{ github.sha }}
+          path: dist-v14/
+          if-no-files-found: error
