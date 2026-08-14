@@ -1,0 +1,58 @@
+name: Make full release publication race-safe once
+
+on:
+  push:
+    branches: [agent/v1.3-platform]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: agent/v1.3-platform
+          fetch-depth: 0
+          persist-credentials: true
+      - shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "kingaibot-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git pull --rebase origin agent/v1.3-platform
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/release-v13-full.yml')
+          text = p.read_text()
+          old = '''          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --verify-tag --generate-notes --title "KINGAIBOT $tag"
+          fi
+          gh release upload "$tag" dist-v13/* --clobber
+'''
+          new = '''          if ! gh release view "$tag" >/dev/null 2>&1; then
+            if ! gh release create "$tag" --verify-tag --generate-notes --title "KINGAIBOT $tag"; then
+              # Another release workflow may have created the same tag between
+              # our view and create calls. Treat that as success only when the
+              # release is now resolvable.
+              gh release view "$tag" >/dev/null
+            fi
+          fi
+          gh release upload "$tag" dist-v13/* --clobber
+'''
+          if old not in text:
+              if new in text:
+                  raise SystemExit(0)
+              raise SystemExit('release publication block did not match expected source')
+          p.write_text(text.replace(old, new, 1))
+          PY
+          rm -f .github/workflows/patch-release-race-v13.yml
+          git add -A
+          git commit -m "Make full release publication race-safe" || exit 0
+          for attempt in 1 2 3; do
+            if git push origin HEAD:agent/v1.3-platform; then exit 0; fi
+            git fetch origin agent/v1.3-platform
+            git rebase origin/agent/v1.3-platform
+          done
+          exit 1
