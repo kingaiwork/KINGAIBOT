@@ -21,8 +21,12 @@ func (m *Manager) SendSessionV14(id, text string) (*task.Task, error) {
 // and delegates the remaining control-plane API to the compatibility handler.
 // Exact method/path patterns win over the fallback root handler.
 func (m *Manager) HandlerV14() http.Handler {
+	// New v1.4 workflow runs use a distinct durable status, so the legacy startup
+	// recovery path ignores them. Recover them here before serving requests.
+	m.RecoverWorkflowRunsV14()
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/platform/sessions/{id}/messages", m.httpSessionMessageV14)
+	mux.HandleFunc("POST /v1/platform/workflows/{id}/run", m.httpWorkflowRunV14)
 	mux.Handle("/", m.Handler())
 	return mux
 }
@@ -40,6 +44,15 @@ func (m *Manager) httpSessionMessageV14(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writePlatformJSON(w, http.StatusAccepted, created)
+}
+
+func (m *Manager) httpWorkflowRunV14(w http.ResponseWriter, r *http.Request) {
+	run, err := m.RunWorkflowV14(r.PathValue("id"))
+	if err != nil {
+		platformProblem(w, err)
+		return
+	}
+	writePlatformJSON(w, http.StatusAccepted, run)
 }
 
 // InboundHandlerV14 keeps the conservative receipt/reconciliation behavior of
