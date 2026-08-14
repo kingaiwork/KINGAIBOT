@@ -2,82 +2,465 @@
 
 ## English
 
-KINGAIBOT is designed as a multi-year platform, not a single release. Development is capability-gated: new autonomy is introduced only after security, observability and rollback controls are mature enough.
+KINGAIBOT is a multi-year platform. The roadmap is capability-gated: autonomy expands only after the required identity, audit, observability and rollback controls exist.
 
-### Phase 1 — Hardened execution core
-Durable tasks, policy, approvals, audit integrity, safe networking, model abstraction, MCP/A2A baseline and signed upgrade path.
+## Delivered baseline through v1.3
 
-### Phase 2 — Plugin isolation
-WASM/WASI component runtime, capability-scoped plugins, signed plugin manifests, resource budgets and deterministic permission boundaries.
+### Hardened execution core
 
-### Phase 3 — Enterprise identity and secrets
-OIDC, SSO, RBAC/ABAC, KMS/HSM integration, tenant isolation, scoped service identities and short-lived credentials.
+Delivered:
 
-### Phase 4 — Distributed durable runtime
-Multiple nodes, leases, task ownership, durable queues, replay-safe workflows, recovery coordination and optional edge runtimes.
+- durable tasks and restart recovery
+- exact approval binding
+- `allow / ask / deny` policy
+- hash-chained audit integrity
+- safe filesystem sandbox
+- guarded HTTP / SSRF defenses
+- shell deny-by-default
+- provider fallback/circuit breaker
+- MCP/A2A
+- signed update path
+- Go 1.26.6 security baseline
 
-### Phase 5 — Advanced long-term memory
-Hybrid semantic + graph memory, provenance, confidence, retention policy, user/org boundaries, memory lifecycle and poisoning defenses.
+### Platform Control Plane
 
-### Phase 6 — Multi-agent coordination
-Agent roles, capability discovery, delegation policies, cost/risk routing, A2A streaming/push evolution and bounded recursive coordination.
+Delivered baseline primitives:
 
-### Phase 7 — MCP platform
-MCP client/server extensions, resource subscriptions, richer auth, tool catalogs, enterprise connectors and policy-aware tool federation.
+- agent profiles
+- durable sessions
+- recurring schedules
+- sequential workflows and restart-aware runs
+- bounded parallel multi-agent missions
+- node registrations
+- plugin adapters
+- channel adapters
+- integrity-hashed skills
+- scoped identities / API keys
+- inbound webhook idempotency
+- platform status and Prometheus-style counters
+- zero-dependency local Control Center
 
-### Phase 8 — Deep observability
-OpenTelemetry traces, metrics, structured events, cost/token accounting, SIEM export, forensic timelines and reliability SLOs.
+### Long-term knowledge
 
-### Phase 9 — Self-healing and controlled evolution
-Failure clustering, automated diagnosis, regression generation, sandbox repair proposals, shadow tests, canary activation and automatic rollback.
+Delivered baseline:
 
-### Phase 10 — Device and edge execution
-Desktop, server, mobile-control and edge runtimes with scoped local capabilities and hardware-aware execution.
+- bounded episodic memory
+- secret redaction
+- reviewed knowledge items
+- subject/predicate/object relations
+- confidence/source/tags/expiry
+- proposal/review trust boundary
+- approved-only trusted search
 
-### Phase 11 — Supply-chain maturity
-Reproducible builds, SBOM policy, provenance verification, signed plugins, dependency admission gates and independent security testing.
+### Multi-node execution
 
-### Phase 12 — KING AI integration
-Introduce a controlled contract between KING AI and KINGAIBOT so the main intelligent-lifeform system can dispatch missions to the execution layer without surrendering governance or safety boundaries.
+Delivered baseline:
+
+- durable coordinator jobs
+- Worker credentials
+- capability matching
+- bounded leases
+- conservative replay
+- reconciliation state
+- reference `kingworker` client
+
+This is a **single durable coordinator with multiple remote workers**, not yet a multi-controller HA control plane.
+
+### Provider Fabric
+
+Delivered:
+
+- OpenAI-compatible adapter
+- native Anthropic Messages adapter
+- native Gemini function-calling adapter
+- startup provider-type validation
+- shared guarded network/retry/fallback boundary
+
+### Controlled evolution
+
+Delivered control-state baseline:
+
+- proposal
+- evaluation
+- review-required gate
+- approve/reject
+- staged artifact identity
+- signature/health release gates
+- released/rolled-back records
+
+The production runtime still does not self-edit or self-deploy from model output.
 
 ---
 
-## 中文
+## Remaining enterprise and frontier roadmap
 
-KINGAIBOT 是多年持续研发的平台，而不是一次发布就结束的产品。路线采用“能力闸门”原则：只有安全、可观测和回滚机制成熟后，才扩大自治权限。
+### Phase A — Strong plugin isolation
 
-### 第一阶段：加固执行核心
-Durable Task、权限策略、审批、审计完整性、安全网络、多模型抽象、MCP/A2A 基线、签名升级。
+Next:
 
-### 第二阶段：插件强隔离
-WASM/WASI Component Runtime、能力级插件授权、插件签名、资源预算和确定性权限边界。
+- WASM/WASI Component Runtime
+- capability-scoped local plugins
+- signed plugin manifests/catalogs
+- CPU/memory/time budgets
+- deterministic host-function permissions
 
-### 第三阶段：企业身份和密钥
-OIDC、SSO、RBAC/ABAC、KMS/HSM、多租户隔离、服务身份和短期凭据。
+Current remote plugin adapters avoid loading arbitrary third-party code into the trusted daemon, but a first-class local WASI host is not yet bundled.
 
-### 第四阶段：分布式 Durable Runtime
-多节点、Lease、任务归属、Durable Queue、可安全重放工作流、故障协调和边缘节点。
+### Phase B — Enterprise identity and secrets
 
-### 第五阶段：高级长期记忆
-语义 + 图谱混合记忆、来源、可信度、保留策略、用户/企业边界、生命周期和记忆投毒防护。
+Next:
 
-### 第六阶段：多智能体协作
-角色、能力发现、委派策略、成本/风险路由、A2A Streaming/Push 和受限递归协作。
+- OIDC
+- SSO
+- external IdP integration
+- richer RBAC/ABAC conditions
+- KMS/HSM
+- short-lived service identities
+- tenant/org isolation
+- credential rotation workflows
 
-### 第七阶段：MCP 平台化
-MCP Client/Server 扩展、资源订阅、更完善认证、工具目录、企业连接器和策略化工具联邦。
+v1.3 API keys/RBAC are the local durable baseline, not a replacement for enterprise IdP/KMS infrastructure.
 
-### 第八阶段：深度可观测性
-OpenTelemetry Trace/Metrics/Event、Token 与成本、SIEM、取证时间线和可靠性 SLO。
+### Phase C — Multi-controller distributed runtime
 
-### 第九阶段：自我修复和受控进化
-故障聚类、自动诊断、回归测试生成、沙箱修复提案、Shadow Test、Canary 和自动回滚。
+Next:
 
-### 第十阶段：设备和边缘执行
-桌面、服务器、移动控制端和边缘 Runtime，按设备能力与硬件约束安全执行。
+- transactional database-backed task/approval/platform stores
+- multiple control-plane replicas
+- distributed leases
+- fencing tokens
+- leaderless or leader-coordinated scheduling
+- durable queue backend
+- replay-safe workflow transactions
+- object/stream storage
+- regional/edge coordination
 
-### 第十一阶段：软件供应链成熟
-可复现构建、SBOM 策略、Provenance 验证、插件签名、依赖准入和第三方独立安全测试。
+The existing Worker lease protocol is designed so these backends can replace local storage without giving workers core Admin authority.
 
-### 第十二阶段：与 KING AI 主系统整合
-建立 KING AI ↔ KINGAIBOT 的受控契约，使主智慧生命体可以向终端执行层下发 Mission，同时不牺牲治理、安全和人工接管边界。
+### Phase D — Advanced semantic memory
+
+Next:
+
+- vector/embedding search backend
+- semantic + lexical hybrid retrieval
+- graph traversal scoring
+- provenance chains
+- confidence decay
+- tenant/user boundaries
+- memory lifecycle policies
+- poisoning detection
+- verified-source weighting
+
+v1.3 intentionally requires review before knowledge becomes trusted.
+
+### Phase E — Concrete channel adapters
+
+Next production adapters may include:
+
+- Telegram
+- Discord
+- Slack
+- Email
+- WebChat
+- WhatsApp-compatible external bridge
+
+The current generic inbound/outbound channel boundary, sender controls and event idempotency should remain the shared security layer.
+
+### Phase F — Browser and device runtimes
+
+Next:
+
+- dedicated Chromium/CDP worker
+- screenshot/page-state evidence
+- browser-profile isolation
+- domain/capability policies
+- download/upload boundaries
+- Android bridge worker
+- desktop accessibility/UI automation worker
+- hardware/device capability manifests
+
+High-privilege device control should remain outside the core daemon and use capability-scoped Worker credentials.
+
+### Phase G — Advanced multi-agent coordination
+
+Next:
+
+- agent capability discovery
+- dynamic delegation budgets
+- cost/risk routing
+- bounded recursive delegation
+- quorum/critic/evaluator patterns
+- streaming A2A coordination
+- mission cancellation trees
+- shared evidence references without shared authority
+
+### Phase H — MCP platform depth
+
+Next:
+
+- richer MCP auth
+- resource subscriptions
+- tool catalogs
+- enterprise connectors
+- policy-aware federated resources
+- per-server capability budgets
+
+### Phase I — Deep observability
+
+Next:
+
+- OpenTelemetry traces
+- OTLP export
+- structured metrics/events
+- token/cost accounting
+- distributed trace IDs across Worker/MCP/A2A
+- SIEM export
+- forensic timelines
+- SLO/error-budget dashboards
+
+v1.3 provides local status, audit history and Prometheus-style counters as the baseline.
+
+### Phase J — Automated diagnosis and safe repair pipeline
+
+Next:
+
+- failure clustering
+- automated regression generation
+- sandbox patch proposals
+- ephemeral build/test workers
+- static/security analysis gates
+- shadow execution
+- canary scoring
+- automated rollback telemetry
+- draft pull-request generation
+
+The trust boundary remains: proposal automation may increase, but release authority must remain outside model self-permission.
+
+### Phase K — Supply-chain maturity
+
+Next:
+
+- reproducible-build verification across independent builders
+- signed plugin catalogs
+- dependency admission policies
+- organization-wide SBOM policy
+- stronger provenance verification
+- external penetration testing
+- independent security review
+
+### Phase L — KING AI integration
+
+Final integration goal:
+
+```text
+KING AI Mission / Governance
+          |
+     signed/scoped contract
+          |
+KINGAIBOT Mission + Execution APIs
+          |
+policy / approval / audit / evidence
+          |
+workers / tools / channels / devices / services
+```
+
+KING AI should be able to dispatch missions without inheriting raw machine privileges and without bypassing human takeover or rollback.
+
+---
+
+# 中文
+
+KINGAIBOT 是多年持续研发的平台，采用“能力闸门”原则：只有身份、审计、可观测与回滚机制成熟后，才扩大自治权限。
+
+## 截至 v1.3 已交付的基础能力
+
+### 加固执行内核
+
+已经实现：
+
+- Durable Task 与重启恢复
+- 精确审批绑定
+- `allow / ask / deny`
+- 哈希链审计
+- 安全文件沙箱
+- SSRF / DNS Rebinding 防护
+- Shell 默认关闭
+- Provider fallback / circuit breaker
+- MCP / A2A
+- 签名升级链
+- Go 1.26.6 安全基线
+
+### Platform Control Plane
+
+已经实现平台原语：
+
+- Agent Profile
+- Durable Session
+- Schedule
+- Workflow / Workflow Run
+- Parallel Mission
+- Node
+- Plugin
+- Channel
+- Skill
+- Scoped Identity / API Key
+- 入站 Webhook 幂等
+- 平台状态 / Prometheus 风格指标
+- 零第三方依赖本地 Control Center
+
+### 长期知识
+
+已经实现：
+
+- 有界 Episodic Memory
+- Secret Redaction
+- 可审核 Knowledge Item
+- Subject / Predicate / Object 图谱关系
+- Confidence / Source / Tags / Expiry
+- Proposal / Review 信任边界
+- 只有 Approved 数据进入可信检索
+
+### 多节点执行
+
+已经实现：
+
+- Durable Cluster Job
+- Worker 独立凭据
+- Capability Matching
+- Lease
+- Conservative Replay
+- Reconciliation
+- `kingworker` 参考客户端
+
+当前属于“**单 Durable Coordinator + 多 Worker**”，不是多控制器 HA。
+
+### Provider Fabric
+
+已经实现：
+
+- OpenAI-compatible
+- Anthropic Messages 原生适配
+- Gemini Function Calling 原生适配
+- Provider Type 启动校验
+- 统一安全网络 / 重试 / fallback 边界
+
+### 受控进化
+
+已经实现控制状态基础：
+
+- Proposal
+- Evaluation
+- Review Required
+- Approve / Reject
+- Staged Artifact
+- Signature / Health Release Gate
+- Released / Rolled Back
+
+生产 Runtime 仍然不会把模型输出直接当成“自我修改/自我部署”的授权。
+
+## 后续真正未完成的企业级与前沿路线
+
+### A. WASM / WASI 插件强隔离
+
+- Component Runtime
+- Capability-scoped local plugin
+- 插件签名目录
+- CPU / 内存 / 时间资源预算
+
+### B. 企业身份与密钥
+
+- OIDC
+- SSO
+- 外部 IdP
+- 更完整 RBAC / ABAC
+- KMS / HSM
+- 短期服务凭据
+- 多租户隔离
+
+### C. 多控制器分布式 HA
+
+- 数据库事务存储
+- 多 Control Plane Replica
+- Distributed Lease
+- Fencing Token
+- Durable Queue Backend
+- Regional / Edge Coordination
+
+### D. 高级语义记忆
+
+- Vector / Embedding
+- Semantic + Lexical Hybrid Search
+- 图谱评分
+- Provenance Chain
+- Confidence Decay
+- Poisoning Defense
+
+### E. 具体 Channel Driver
+
+- Telegram
+- Discord
+- Slack
+- Email
+- WebChat
+- WhatsApp 外部桥接
+
+这些应继续复用 v1.3 已有的 Channel 独立鉴权、Sender 白名单和 Event Idempotency。
+
+### F. 浏览器与设备 Worker
+
+- Chromium / CDP
+- Screenshot Evidence
+- Browser Profile Isolation
+- Android Bridge
+- Desktop UI Automation
+- Hardware Capability Manifest
+
+高权限设备控制继续放在独立 Worker，而不是塞进核心 daemon。
+
+### G. 高级多智能体协作
+
+- Capability Discovery
+- 成本/风险路由
+- 递归委派预算
+- Critic / Evaluator / Quorum 模式
+- A2A Streaming
+- Mission Cancellation Tree
+
+### H. MCP 平台深化
+
+- Resource Subscription
+- Rich Auth
+- Tool Catalog
+- Enterprise Connector
+- Per-server Budget
+
+### I. 深度可观测性
+
+- OpenTelemetry
+- OTLP
+- Token / Cost
+- Distributed Trace
+- SIEM
+- SLO / Error Budget
+
+### J. 自动诊断 + 安全修复流水线
+
+- Failure Clustering
+- Regression Generation
+- Sandbox Patch Proposal
+- Ephemeral Test Worker
+- Shadow Test
+- Canary
+- Draft PR
+- Rollback Telemetry
+
+### K. 软件供应链成熟
+
+- Reproducible Build Verification
+- Signed Plugin Catalog
+- Dependency Admission
+- External Security Review
+
+### L. 与 KING AI 主系统整合
+
+最终目标是 KING AI 能向 KINGAIBOT 下发 Mission，但不能因此直接获得机器 Root 权限，也不能绕过审批、审计、人工接管和回滚。
