@@ -81,9 +81,12 @@ func taskMetadataString(metadata map[string]any, key string) string {
 // fail-closed terminal decision and never cancels or rewrites an existing Task.
 func (m *Manager) ReconcileInboundReceipt(id, decision, taskID, note string) (*InboundReceipt, error) {
 	decision = strings.ToLower(strings.TrimSpace(decision))
-	note = clean(memory.SanitizeContent(note), 4096)
+	note = strings.TrimSpace(memory.SanitizeContent(note))
 	if note == "" {
 		return nil, errors.New("reconciliation note required")
+	}
+	if len(note) > 4096 {
+		return nil, errors.New("reconciliation note exceeds limit")
 	}
 	if decision != "link_task" && decision != "mark_failed" {
 		return nil, errors.New("decision must be link_task or mark_failed")
