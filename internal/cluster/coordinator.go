@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -19,7 +18,6 @@ import (
 
 	"github.com/kingaiwork/KINGAIBOT/internal/eventlog"
 	"github.com/kingaiwork/KINGAIBOT/internal/memory"
-	"github.com/kingaiwork/KINGAIBOT/internal/provider"
 	"github.com/kingaiwork/KINGAIBOT/internal/storage"
 )
 
@@ -54,6 +52,7 @@ type Job struct {
 	Payload              json.RawMessage `json:"payload"`
 	RequiredCapabilities []string        `json:"required_capabilities,omitempty"`
 	Priority             int             `json:"priority"`
+	ReplayPolicy         string          `json:"replay_policy"`
 	Status               string          `json:"status"`
 	LeaseOwner           string          `json:"lease_owner,omitempty"`
 	LeaseTokenHash       string          `json:"lease_token_hash,omitempty"`
@@ -300,6 +299,13 @@ func normalizeJob(in Job) (Job, error) {
 		return Job{}, errors.New("job payload must be valid JSON <= 1 MiB")
 	}
 	in.RequiredCapabilities = normalizeCaps(in.RequiredCapabilities)
+	in.ReplayPolicy = strings.ToLower(strings.TrimSpace(in.ReplayPolicy))
+	if in.ReplayPolicy == "" {
+		in.ReplayPolicy = "manual"
+	}
+	if in.ReplayPolicy != "manual" && in.ReplayPolicy != "safe" {
+		return Job{}, errors.New("replay_policy must be manual or safe")
+	}
 	if in.Priority < -1000 {
 		in.Priority = -1000
 	}
@@ -331,7 +337,7 @@ func (c *Coordinator) Submit(in Job) (*Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := c.events.Append(eventlog.Event{Type: "cluster.job.submitted", Data: map[string]any{"job_id": id, "kind": in.Kind, "required_capabilities": in.RequiredCapabilities}}); err != nil {
+	if err := c.events.Append(eventlog.Event{Type: "cluster.job.submitted", Data: map[string]any{"job_id": id, "kind": in.Kind, "required_capabilities": in.RequiredCapabilities, "replay_policy": in.ReplayPolicy}}); err != nil {
 		in.Status = "failed"
 		in.Error = "audit unavailable; job will not be leased"
 		in.UpdatedAt = time.Now().UTC()
@@ -346,7 +352,7 @@ func (c *Coordinator) Submit(in Job) (*Job, error) {
 func (c *Coordinator) Jobs() ([]*Job, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err := c.requeueExpiredLocked(time.Now().UTC()); err != nil {
+	if err := c.handleExpiredLocked(time.Now().UTC()); err != nil {
 		return nil, err
 	}
 	return c.jobsLocked()
@@ -379,18 +385,18 @@ func (c *Coordinator) jobsLocked() ([]*Job, error) {
 
 func hasCaps(worker, required []string) bool {
 	set := map[string]struct{}{}
-	for _, c := range worker {
-		set[c] = struct{}{}
+	for _, cap := range worker {
+		set[cap] = struct{}{}
 	}
-	for _, c := range required {
-		if _, ok := set[c]; !ok {
+	for _, cap := range required {
+		if _, ok := set[cap]; !ok {
 			return false
 		}
 	}
 	return true
 }
 
-func (c *Coordinator) requeueExpiredLocked(now time.Time) error {
+func (c *Coordinator) handleExpiredLocked(now time.Time) error {
 	entries, err := os.ReadDir(filepath.Join(c.dir, "jobs"))
 	if err != nil {
 		return err
@@ -404,9 +410,27 @@ func (c *Coordinator) requeueExpiredLocked(now time.Time) error {
 		if read(path, &j) != nil {
 			continue
 		}
-		if j.Status == "leased" && j.LeaseExpiresAt != nil && !j.LeaseExpiresAt.After(now) {
+		if j.Status != "leased" || j.LeaseExpiresAt == nil || j.LeaseExpiresAt.After(now) {
+			continue
+		}
+		workerID := j.LeaseOwner
+		j.Status = "reconciliation"
+		j.Error = "lease expired; remote side effect outcome may be ambiguous"
+		j.UpdatedAt = now
+		if err := save(path, &j); err != nil {
+			return err
+		}
+		decision := "manual_reconciliation"
+		if j.ReplayPolicy == "safe" {
+			decision = "safe_requeue"
+		}
+		if err := c.events.Append(eventlog.Event{Type: "cluster.job.lease_expired", Data: map[string]any{"job_id": j.ID, "worker_id": workerID, "attempt": j.Attempts, "decision": decision}}); err != nil {
+			return fmt.Errorf("expired lease moved to reconciliation because audit failed: %w", err)
+		}
+		if j.ReplayPolicy == "safe" {
 			j.Status, j.LeaseOwner, j.LeaseTokenHash, j.LeaseExpiresAt = "queued", "", "", nil
-			j.UpdatedAt = now
+			j.Error = ""
+			j.UpdatedAt = time.Now().UTC()
 			if err := save(path, &j); err != nil {
 				return err
 			}
@@ -427,7 +451,7 @@ func (c *Coordinator) LeaseJob(worker *Worker, leaseSeconds int) (*Lease, error)
 	}
 	n := time.Now().UTC()
 	c.mu.Lock()
-	if err := c.requeueExpiredLocked(n); err != nil {
+	if err := c.handleExpiredLocked(n); err != nil {
 		c.mu.Unlock()
 		return nil, err
 	}
@@ -470,7 +494,7 @@ func (c *Coordinator) LeaseJob(worker *Worker, leaseSeconds int) (*Lease, error)
 		return nil, err
 	}
 	c.mu.Unlock()
-	if err := c.events.Append(eventlog.Event{Type: "cluster.job.leased", Data: map[string]any{"job_id": selected.ID, "worker_id": worker.ID, "attempt": selected.Attempts, "lease_expires_at": expires}}); err != nil {
+	if err := c.events.Append(eventlog.Event{Type: "cluster.job.leased", Data: map[string]any{"job_id": selected.ID, "worker_id": worker.ID, "attempt": selected.Attempts, "lease_expires_at": expires, "replay_policy": selected.ReplayPolicy}}); err != nil {
 		selected.Status, selected.LeaseOwner, selected.LeaseTokenHash, selected.LeaseExpiresAt = "queued", "", "", nil
 		selected.UpdatedAt = time.Now().UTC()
 		c.mu.Lock()
@@ -500,9 +524,16 @@ func (c *Coordinator) Complete(worker *Worker, jobID, leaseToken string, result 
 		c.mu.Unlock()
 		return nil, err
 	}
-	if j.Status != "leased" || j.LeaseOwner != worker.ID || j.LeaseExpiresAt == nil || !j.LeaseExpiresAt.After(time.Now().UTC()) || !constantHashEqual(leaseToken, j.LeaseTokenHash) {
+	now := time.Now().UTC()
+	if j.Status != "leased" || j.LeaseOwner != worker.ID || j.LeaseExpiresAt == nil || !j.LeaseExpiresAt.After(now) || !constantHashEqual(leaseToken, j.LeaseTokenHash) {
 		c.mu.Unlock()
 		return nil, errors.New("invalid or expired lease")
+	}
+	j.Status = "completing"
+	j.UpdatedAt = now
+	if err := save(path, &j); err != nil {
+		c.mu.Unlock()
+		return nil, err
 	}
 	c.mu.Unlock()
 
@@ -514,8 +545,13 @@ func (c *Coordinator) Complete(worker *Worker, jobID, leaseToken string, result 
 			jobErr = jobErr[:8192]
 		}
 	}
-	// Completion audit is written before the result becomes trusted terminal state.
 	if err := c.events.Append(eventlog.Event{Type: "cluster.job." + status, Data: map[string]any{"job_id": j.ID, "worker_id": worker.ID, "attempt": j.Attempts}}); err != nil {
+		j.Status = "reconciliation"
+		j.Error = "completion received but audit failed; manual reconciliation required"
+		j.UpdatedAt = time.Now().UTC()
+		c.mu.Lock()
+		_ = save(path, &j)
+		c.mu.Unlock()
 		return nil, fmt.Errorf("job completion requires reconciliation because audit failed: %w", err)
 	}
 	n := time.Now().UTC()
@@ -530,42 +566,60 @@ func (c *Coordinator) Complete(worker *Worker, jobID, leaseToken string, result 
 	return &j, nil
 }
 
-func (c *Coordinator) ToolDefinitions() []provider.ToolDef {
-	return []provider.ToolDef{
-		{Type: "function", Function: provider.FunctionDef{Name: "cluster_workers_list", Description: "List registered remote workers and their declared capabilities", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}}},
-		{Type: "function", Function: provider.FunctionDef{Name: "cluster_job_submit", Description: "Submit a durable capability-matched job to the remote worker queue", Parameters: map[string]any{"type": "object", "properties": map[string]any{"kind": map[string]any{"type": "string"}, "payload": map[string]any{}, "required_capabilities": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "priority": map[string]any{"type": "integer"}}, "required": []string{"kind"}}}},
-		{Type: "function", Function: provider.FunctionDef{Name: "cluster_jobs_list", Description: "List durable remote jobs and lease state", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}}},
+func (c *Coordinator) Reconcile(jobID, action, note string, result json.RawMessage) (*Job, error) {
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action != "requeue" && action != "fail" && action != "complete" {
+		return nil, errors.New("action must be requeue, fail or complete")
 	}
-}
-
-func (c *Coordinator) ExecuteTool(_ context.Context, _ string, name string, raw json.RawMessage) (string, error) {
-	var v any
-	var err error
-	switch name {
-	case "cluster_workers_list":
-		v, err = c.Workers()
-	case "cluster_jobs_list":
-		v, err = c.Jobs()
-	case "cluster_job_submit":
-		var in struct {
-			Kind                 string          `json:"kind"`
-			Payload              json.RawMessage `json:"payload"`
-			RequiredCapabilities []string        `json:"required_capabilities"`
-			Priority             int             `json:"priority"`
-		}
-		if er := json.Unmarshal(raw, &in); er != nil {
-			return "", er
-		}
-		v, err = c.Submit(Job{Kind: in.Kind, Payload: in.Payload, RequiredCapabilities: in.RequiredCapabilities, Priority: in.Priority})
-	default:
-		return "", errors.New("unknown cluster tool")
+	if len(result) > maxResultBytes || (len(result) > 0 && !json.Valid(result)) {
+		return nil, errors.New("result must be valid JSON <= 4 MiB")
 	}
+	path, err := c.jobPath(jobID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	b, err := json.Marshal(v)
+	c.mu.Lock()
+	var j Job
+	if err := read(path, &j); err != nil {
+		c.mu.Unlock()
+		return nil, err
+	}
+	if j.Status != "reconciliation" && j.Status != "completing" {
+		c.mu.Unlock()
+		return nil, errors.New("job is not awaiting reconciliation")
+	}
+	c.mu.Unlock()
+	note = memory.SanitizeContent(strings.TrimSpace(note))
+	if len(note) > 8192 {
+		note = note[:8192]
+	}
+	if err := c.events.Append(eventlog.Event{Type: "cluster.job.reconciled", Data: map[string]any{"job_id": j.ID, "action": action, "note": note}}); err != nil {
+		return nil, fmt.Errorf("reconciliation blocked because audit failed: %w", err)
+	}
+	n := time.Now().UTC()
+	switch action {
+	case "requeue":
+		j.Status = "queued"
+		j.Result = nil
+		j.Error = ""
+		j.CompletedAt = nil
+	case "fail":
+		j.Status = "failed"
+		j.Error = note
+		j.CompletedAt = &n
+	case "complete":
+		j.Status = "completed"
+		j.Result = append(json.RawMessage(nil), result...)
+		j.Error = ""
+		j.CompletedAt = &n
+	}
+	j.LeaseOwner, j.LeaseTokenHash, j.LeaseExpiresAt = "", "", nil
+	j.UpdatedAt = n
+	c.mu.Lock()
+	err = save(path, &j)
+	c.mu.Unlock()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return string(b), nil
+	return &j, nil
 }
