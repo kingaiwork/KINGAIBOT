@@ -20,6 +20,25 @@ Platform expansion over the hardened v1.2 execution core:
 - Added platform and extension-policy unit tests and fixed root binary ignore patterns that previously shadowed `cmd/kingagent*` source paths during automation.
 - Runtime version advanced to KINGAIBOT 1.3.0 while retaining the v1.2 hardened execution core as the trust foundation.
 
+Authority, WorkGraph and orchestration hardening added during the v1.3 development cycle:
+
+- Added durable KINGAIBOT Capability Envelopes with capability, data-scope, tool-scope, budget, expiry and delegation-depth boundaries.
+- Delegated authority can only narrow a parent grant; revoked or expired parents invalidate descendant grants.
+- Added trusted agent-to-task authority binding: platform-created tasks resolve authority from trusted `agent_id` metadata; model tool arguments never carry or select `authority_id`.
+- Added durable typed WorkGraph DAGs with approval gates, replay policy, high-risk evidence requirements and conservative side-effect reconciliation.
+- Added persistent WorkGraph administration APIs under `/v1/workgraphs`.
+- Added authority-bound Cluster submission, lease and completion checks. Authority is revalidated before a Worker receives a lease and before a Worker result becomes terminal success.
+- If authority changes while remote work is executing, the reported result is retained and the Job moves to `reconciliation` instead of being accepted as completed.
+- Added authority-aware reconciliation: an administrator may record an already-observed external result, but `requeue` requires currently effective execution authority.
+- Added native Cluster `held` Jobs for race-free orchestration. Held Jobs are durable but cannot be leased until the corresponding WorkGraph node is durably running and the activation transition is audited.
+- Added durable `internal/orchestration` bindings linking WorkGraph node, Cluster Job and resolved Authority without accepting a client/model-selected authority identifier.
+- Added restart recovery for held/active/reconciling bindings and fail-closed cancellation of orphaned held jobs.
+- Added completion evidence propagation from Cluster Job results into WorkGraph nodes using Job identity and result SHA-256.
+- Added Admin-only orchestration APIs under `/v1/orchestration/`; model-facing tools do not receive orchestration approval, dispatch, completion or reconciliation authority.
+- Added Clean-Room originality/IP policy, change provenance records and third-party dependency inventory checks. The implementation is developed from KING requirements and public standards rather than copied agent-framework source or product internals.
+- Updated the production baseline from Go 1.26.5 to Go **1.26.6** and fixed provider metadata persistence, approval denial/rollback semantics, hard-bounded root rate-limit state, release packaging nounset handling and Go 1.26 `ServeMux` console startup compatibility.
+- Removed obsolete development-only patch/format/once workflows so formal CI, CodeQL and v1.3 validation/release workflows are the authoritative verification paths.
+
 ### 中文
 
 在 V1.2 加固执行内核之上的完整平台扩展：
@@ -37,6 +56,25 @@ Platform expansion over the hardened v1.2 execution core:
 - 新增受 Admin Token 保护的 `/v1/platform/*` 管理 API。
 - 新增平台与扩展审批单元测试，并修复 `.gitignore` 根目录二进制规则误覆盖 `cmd/kingagent*` 源码目录的问题。
 - Runtime 版本升级为 KINGAIBOT 1.3.0，V1.2 的加固执行核继续作为信任根。
+
+本轮 v1.3 继续新增 Authority / WorkGraph / Orchestration 安全执行链：
+
+- 新增 KINGAIBOT 原创 Capability Envelope 持久授权体系，可限制 Capability、数据范围、工具范围、预算、过期时间与委派深度。
+- 子授权只能缩小父授权；父授权吊销或过期后，所有后代授权立即失效。
+- 新增可信 Agent → Task 授权绑定：平台创建任务时从可信 `agent_id` 解析授权，模型工具参数不能携带或自行选择 `authority_id`。
+- 新增持久化 Typed WorkGraph DAG，支持审批门、Replay Policy、高风险证据要求与保守的 Side Effect Reconciliation。
+- 新增 `/v1/workgraphs` Admin 管理 API。
+- Cluster 在 Job 提交、Worker Lease 发放、Worker Result 提交三个阶段都会重新校验执行权限。
+- 如果远程执行过程中权限被撤销或失效，Worker 返回结果会被保留为证据，Job 进入 `reconciliation`，不会直接记为完成。
+- Admin 可以在核验真实外部状态后记录 reconciliation 结果，但 `requeue` 会再次检查原始执行授权，撤权后不能借人工 reconciliation 重新启动执行。
+- 新增 Cluster `held` 状态实现无竞态派发：Held Job 已持久化但 Worker 永远租不到，直到对应 WorkGraph Node 已经持久进入 Running 且 activation 审计完成。
+- 新增 `internal/orchestration` 持久 Binding，把 WorkGraph Node、Cluster Job 和已解析 Authority 绑定在一起，不接受客户端/模型自报权限。
+- 新增服务重启后的 held / active / reconciling Binding 恢复，并对没有持久 Binding 的 orphan held Job Fail-Closed 取消。
+- Cluster 完成后把 Job ID 与 Result SHA-256 作为 Evidence 回写 WorkGraph，高风险节点不能无证据完成。
+- 新增 `/v1/orchestration/` Admin-only API；模型不获得编排审批、派发、完成或 reconciliation 权限。
+- 新增 Clean-Room 原创/IP 规范、变更来源记录与第三方依赖清单门禁，核心实现来自 KING 自有需求与公开标准，不复制第三方 Agent Framework 源码或产品内部实现。
+- 生产 Go 基线升级到 **1.26.6**，同时修复 Provider 元数据持久化、审批拒绝/审计失败回滚、Root Rate Limiter 硬上限、发布脚本 `set -u` 变量问题，以及 Go 1.26 `ServeMux` 导致的 Console 启动冲突。
+- 清理开发期 `patch / fix / once / format` 临时工作流，正式 CI、CodeQL、v1.3 Validation 与 Release 流程成为唯一可信验证路径。
 
 ## 1.2.0 - 2026-08-12
 
