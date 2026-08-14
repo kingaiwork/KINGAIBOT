@@ -74,10 +74,15 @@ func main() {
 	taskAuthorityResolver, mustErr := authority.NewTaskAuthorityResolver(ts)
 	must(mustErr)
 
-	pm, mustErr := platform.New(filepath.Join(cfg.Runtime.DataDir, "platform"), boundPlatformRuntime, el)
+	// Production uses the crash-safe Platform control surface. Trust-expanding
+	// resources are inert until their authorization audit is durable; schedules
+	// and recovered workflows also require an audit gate before creating tasks.
+	pm, mustErr := platform.NewSafe(filepath.Join(cfg.Runtime.DataDir, "platform"), boundPlatformRuntime, el)
 	must(mustErr)
 	defer pm.Close()
-	tr.RegisterExtension(pm)
+	platformExtension, mustErr := platform.NewSafeExtension(pm)
+	must(mustErr)
+	tr.RegisterExtension(platformExtension)
 
 	ks, mustErr := knowledge.New(filepath.Join(cfg.Runtime.DataDir, "knowledge"), el)
 	must(mustErr)
@@ -170,7 +175,7 @@ func main() {
 
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "enabled", "knowledge", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "safe", "knowledge", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
