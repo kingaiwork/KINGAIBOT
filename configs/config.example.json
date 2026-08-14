@@ -1,6 +1,6 @@
 {
   "name": "KINGAIBOT",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "server": {
     "listen": "127.0.0.1:18888",
     "base_url": "",
@@ -33,12 +33,34 @@
       "allow_insecure_http": false
     },
     {
+      "name": "anthropic-native",
+      "type": "anthropic",
+      "base_url": "https://api.anthropic.com",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "model": "replace-with-current-claude-model",
+      "priority": 20,
+      "enabled": false,
+      "allow_private_network": false,
+      "allow_insecure_http": false
+    },
+    {
+      "name": "gemini-native",
+      "type": "gemini",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "api_key_env": "GEMINI_API_KEY",
+      "model": "replace-with-current-gemini-model",
+      "priority": 30,
+      "enabled": false,
+      "allow_private_network": false,
+      "allow_insecure_http": false
+    },
+    {
       "name": "fallback-compatible",
       "type": "openai-compatible",
       "base_url": "https://example.invalid/v1",
       "api_key_env": "FALLBACK_API_KEY",
       "model": "replace-me",
-      "priority": 20,
+      "priority": 40,
       "enabled": false,
       "allow_private_network": false,
       "allow_insecure_http": false
@@ -58,7 +80,23 @@
       "shell_exec": "deny",
       "mcp_tools_list": "allow",
       "mcp_tools_call": "ask",
-      "a2a_send": "ask"
+      "a2a_send": "ask",
+      "platform_agents_list": "allow",
+      "platform_skills_list": "allow",
+      "platform_nodes_list": "allow",
+      "platform_schedule_create": "ask",
+      "platform_mission_dispatch": "ask",
+      "platform_plugin_call": "ask",
+      "platform_channel_send": "ask",
+      "platform_node_action": "ask",
+      "knowledge_search": "allow",
+      "knowledge_neighbors": "allow",
+      "knowledge_propose": "ask",
+      "cluster_workers_list": "allow",
+      "cluster_jobs_list": "allow",
+      "cluster_job_submit": "ask",
+      "evolution_proposals_list": "allow",
+      "evolution_propose_improvement": "ask"
     },
     "shell_allowlist": [],
     "http_allowed_hosts": [

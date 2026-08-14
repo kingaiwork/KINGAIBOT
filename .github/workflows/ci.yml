@@ -14,12 +14,22 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: '1.26.5'
+          go-version: '1.26.6'
           cache: true
       - name: Format check
-        run: test -z "$(gofmt -l .)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "The following Go files require gofmt:"
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
       - name: Vet
         run: go vet ./...
+      - name: Third-party provenance inventory
+        run: bash scripts/check-third-party-inventory.sh
       - name: Govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
@@ -29,7 +39,7 @@ jobs:
       - name: Shell syntax
         run: for f in scripts/*.sh; do bash -n "$f"; done
       - name: Release guard requires production Go
-        run: KINGAGENT_MIN_RELEASE_GO=1.26.5 VERSION=ci SOURCE_DATE_EPOCH=315532800 ./scripts/build-release.sh
+        run: KINGAGENT_MIN_RELEASE_GO=1.26.6 VERSION=ci SOURCE_DATE_EPOCH=315532800 ./scripts/build-release.sh
 
   macos-native:
     runs-on: macos-latest
@@ -39,7 +49,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: '1.26.5'
+          go-version: '1.26.6'
           cache: true
       - name: Native test and build
         run: |
@@ -56,7 +66,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: '1.26.5'
+          go-version: '1.26.6'
           cache: true
       - name: Native test and build
         shell: pwsh

@@ -1,15 +1,27 @@
-KING AGENT OS COMMERCIAL SOURCE LICENSE
-Copyright (c) 2026 DXTECH LLC. All rights reserved.
+KINGAIBOT COMMERCIAL SOURCE LICENSE
+Copyright (c) 2026 USDX TECH LLC. All rights reserved.
 
-This source package is proprietary commercial software. No rights are granted to copy,
-redistribute, sublicense, publish, sell, host as a service, reverse engineer, or create
-derivative commercial distributions except under a separate written license from the
-copyright holder.
+KINGAIBOT original source code, documentation, product text, and KING-owned architecture
+expressions in this repository are proprietary commercial materials of USDX TECH LLC except
+where a file, dependency, generated SBOM, notice, or accompanying record identifies a
+third-party rightsholder or different license.
+
+No rights are granted to copy, redistribute, sublicense, publish, sell, host as a service,
+reverse engineer, or create derivative commercial distributions of KINGAIBOT proprietary
+materials except under a separate written license from the copyright holder.
 
 Customers may receive executable or source rights only as stated in their applicable
-commercial agreement. Third-party components, protocols, trademarks, and services remain
-subject to their respective licenses and terms.
+commercial agreement.
+
+Third-party libraries, tools, standards, protocols, trademarks, services, and other external
+materials are not claimed as KINGAIBOT-original property and remain subject to their own
+licenses, notices, patent rights, trademarks, specifications, and terms. Nothing in this
+license changes or removes those third-party rights or obligations.
+
+Open interoperability with a protocol or API does not imply ownership of that protocol,
+endorsement by its owner, or incorporation of a third-party reference implementation.
 
 THE SOFTWARE IS PROVIDED UNDER THE WARRANTIES, SUPPORT TERMS, SERVICE LEVELS, AND LIABILITY
 LIMITATIONS SET OUT IN THE APPLICABLE COMMERCIAL AGREEMENT. THIS FILE IS NOT LEGAL ADVICE;
-have counsel adapt the final production EULA/MSA and privacy terms before public sale.
+qualified counsel should adapt the final production EULA/MSA, privacy terms, trademark
+strategy, and patent/FTO review for the intended commercial markets before public sale.
