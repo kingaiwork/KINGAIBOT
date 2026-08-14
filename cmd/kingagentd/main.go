@@ -32,7 +32,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/workgraph"
 )
 
-var version = "1.3.0"
+var version = "1.4.0"
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "configuration file")
