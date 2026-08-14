@@ -27,6 +27,7 @@ type Task struct {
 	ID              string         `json:"id"`
 	Input           string         `json:"input"`
 	Output          string         `json:"output,omitempty"`
+	Provider        string         `json:"provider,omitempty"`
 	Status          Status         `json:"status"`
 	Error           string         `json:"error,omitempty"`
 	Attempts        int            `json:"attempts"`
@@ -35,6 +36,7 @@ type Task struct {
 	PendingApproval string         `json:"pending_approval,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 }
+
 type Store struct {
 	dir string
 	mu  sync.RWMutex
@@ -46,12 +48,14 @@ func NewStore(dir string) (*Store, error) {
 	}
 	return &Store{dir: dir}, nil
 }
+
 func (s *Store) path(id string) (string, error) {
 	if err := storage.ValidateID(id); err != nil {
 		return "", err
 	}
 	return filepath.Join(s.dir, id+".json"), nil
 }
+
 func (s *Store) saveLocked(t *Task) error {
 	p, err := s.path(t.ID)
 	if err != nil {
@@ -67,6 +71,7 @@ func (s *Store) saveLocked(t *Task) error {
 	}
 	return storage.AtomicWriteFile(p, b, 0o600)
 }
+
 func (s *Store) Save(t *Task) error {
 	if t == nil {
 		return errors.New("task required")
@@ -75,6 +80,7 @@ func (s *Store) Save(t *Task) error {
 	defer s.mu.Unlock()
 	return s.saveLocked(t)
 }
+
 func (s *Store) getLocked(id string) (*Task, error) {
 	p, err := s.path(id)
 	if err != nil {
@@ -90,11 +96,13 @@ func (s *Store) getLocked(id string) (*Task, error) {
 	}
 	return &t, nil
 }
+
 func (s *Store) Get(id string) (*Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.getLocked(id)
 }
+
 func (s *Store) Update(id string, fn func(*Task) error) (*Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -110,6 +118,7 @@ func (s *Store) Update(id string, fn func(*Task) error) (*Task, error) {
 	}
 	return t, nil
 }
+
 func (s *Store) List() ([]*Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -134,6 +143,7 @@ func (s *Store) List() ([]*Task, error) {
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
 }
+
 func (s *Store) Recoverable() ([]*Task, error) {
 	all, err := s.List()
 	if err != nil {
@@ -147,6 +157,7 @@ func (s *Store) Recoverable() ([]*Task, error) {
 	}
 	return out, nil
 }
+
 func (s *Store) Cancel(id string) error {
 	_, err := s.Update(id, func(t *Task) error {
 		if t.Status == Completed || t.Status == Failed || t.Status == Canceled {
