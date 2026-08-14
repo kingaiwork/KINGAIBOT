@@ -218,8 +218,10 @@ func (c *Coordinator) ActivateHeld(jobID, controlRef string) (*Job, error) {
 	return &public, nil
 }
 
-// CancelHeld terminates a staged job that was never exposed to a Worker. This
-// is used when the surrounding WorkGraph start cannot be committed.
+// CancelHeld terminates a staged job that was never exposed to a Worker. Its
+// terminal truth is committed first; any authority budget reservation is then
+// released using the durable Cluster binding. Cleanup failure leaves capacity
+// conservatively consumed and is retried by runtime budget reconciliation.
 func (c *Coordinator) CancelHeld(jobID, controlRef, reason string) (*Job, error) {
 	controlRef, err := normalizeControlRef(controlRef)
 	if err != nil {
@@ -233,12 +235,13 @@ func (c *Coordinator) CancelHeld(jobID, controlRef, reason string) (*Job, error)
 		reason = reason[:8192]
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	job, hold, err := c.readHeldLocked(jobID)
 	if err != nil {
+		c.mu.Unlock()
 		return nil, err
 	}
 	if hold.ControlRef != controlRef {
+		c.mu.Unlock()
 		return nil, errors.New("held job control reference mismatch")
 	}
 	jobPath, _ := c.jobPath(jobID)
@@ -249,16 +252,22 @@ func (c *Coordinator) CancelHeld(jobID, controlRef, reason string) (*Job, error)
 	job.UpdatedAt = now
 	job.CompletedAt = &now
 	if err := save(jobPath, job); err != nil {
+		c.mu.Unlock()
 		return nil, err
 	}
 	if err := c.events.Append(eventlog.Event{Type: "cluster.job.held_canceled", Data: map[string]any{"job_id": job.ID, "control_ref": controlRef, "reason": reason}}); err != nil {
 		_ = save(jobPath, &original)
+		c.mu.Unlock()
 		return nil, fmt.Errorf("held job cancel rolled back because audit failed: %w", err)
 	}
 	holdPath, _ := c.holdPath(jobID)
 	_ = os.Remove(holdPath)
 	public := *job
 	public.LeaseTokenHash = ""
+	c.mu.Unlock()
+	if releaseErr := c.releaseAuthorityWork(job.ID); releaseErr != nil && !errors.Is(releaseErr, os.ErrNotExist) {
+		c.noteBudgetCleanupPending(job.ID, releaseErr)
+	}
 	return &public, nil
 }
 
