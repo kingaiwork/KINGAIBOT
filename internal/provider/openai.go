@@ -152,7 +152,7 @@ func (c *Client) chatOne(ctx context.Context, p config.Provider, key string, mes
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "KINGAIBOT/1.2")
+	req.Header.Set("User-Agent", "KINGAIBOT/1.3")
 	if key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
