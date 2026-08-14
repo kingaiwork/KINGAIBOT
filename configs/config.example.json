@@ -1,6 +1,6 @@
 {
   "name": "KINGAIBOT",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "server": {
     "listen": "127.0.0.1:18888",
     "base_url": "",
@@ -58,7 +58,21 @@
       "shell_exec": "deny",
       "mcp_tools_list": "allow",
       "mcp_tools_call": "ask",
-      "a2a_send": "ask"
+      "a2a_send": "ask",
+      "platform_agents_list": "allow",
+      "platform_skills_list": "allow",
+      "platform_nodes_list": "allow",
+      "platform_schedule_create": "ask",
+      "platform_mission_dispatch": "ask",
+      "platform_plugin_call": "ask",
+      "platform_channel_send": "ask",
+      "platform_node_action": "ask",
+      "knowledge_search": "allow",
+      "knowledge_neighbors": "allow",
+      "knowledge_propose": "ask",
+      "cluster_workers_list": "allow",
+      "cluster_jobs_list": "allow",
+      "cluster_job_submit": "ask"
     },
     "shell_allowlist": [],
     "http_allowed_hosts": [
