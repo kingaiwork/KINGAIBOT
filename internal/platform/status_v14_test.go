@@ -78,12 +78,22 @@ func TestStatusSnapshotDoesNotPromoteNodeWithoutAuditedHeartbeat(t *testing.T) {
 	if status.Counts["nodes_online"] != 0 {
 		t.Fatalf("status read promoted unaudited node: %#v", status.Counts)
 	}
-	stored, err := m.NodeSafe(node.ID)
+	nodes, err := m.NodesSafe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Online {
-		t.Fatal("StatusSnapshot changed persisted node trust to online")
+	found := false
+	for _, stored := range nodes {
+		if stored.ID != node.ID {
+			continue
+		}
+		found = true
+		if stored.Online {
+			t.Fatal("StatusSnapshot changed persisted node trust to online")
+		}
+	}
+	if !found {
+		t.Fatalf("registered node %s disappeared from safe listing", node.ID)
 	}
 }
 
