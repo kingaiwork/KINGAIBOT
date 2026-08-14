@@ -112,8 +112,9 @@ func main() {
 	root := http.NewServeMux()
 
 	// Scoped platform API: legacy admin secret remains accepted, while durable
-	// access keys can be granted read/write roles without receiving core admin.
-	platformScoped := pm.ScopedAuthHandler(cfg.Server.AdminTokenEnv, pm.Handler())
+	// access keys are evaluated against the path-level read/write/automation/admin
+	// permission boundary before reaching the safe control-plane handler.
+	platformScoped := pm.GovernedScopedAuthHandler(cfg.Server.AdminTokenEnv, pm.Handler())
 	identityAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, pm.IdentityHandler())
 	statusScoped := pm.ScopedAuthHandler(cfg.Server.AdminTokenEnv, pm.StatusHandler())
 	root.Handle("/v1/platform/identities", identityAdmin)
