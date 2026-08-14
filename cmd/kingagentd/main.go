@@ -27,6 +27,7 @@ import (
 	karuntime "github.com/kingaiwork/KINGAIBOT/internal/runtime"
 	"github.com/kingaiwork/KINGAIBOT/internal/task"
 	"github.com/kingaiwork/KINGAIBOT/internal/tool"
+	"github.com/kingaiwork/KINGAIBOT/internal/workgraph"
 )
 
 var version = "1.3.0"
@@ -79,6 +80,9 @@ func main() {
 	must(mustErr)
 	tr.RegisterExtension(ec)
 
+	wgs, mustErr := workgraph.NewStore(filepath.Join(cfg.Runtime.DataDir, "workgraphs"), el)
+	must(mustErr)
+
 	must(rt.Recover())
 
 	coreHandler := api.New(cfg, rt, tr).Handler()
@@ -122,13 +126,20 @@ func main() {
 	evolutionAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, ec.Handler())
 	root.Handle("/v1/evolution/control/", evolutionAdmin)
 
+	// WorkGraph is durable execution intent. Creation and every state transition
+	// are admin-controlled here; model-facing graph proposal tools can be added
+	// separately without giving the model approval or completion authority.
+	workgraphAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, wgs.Handler())
+	root.Handle("/v1/workgraphs", workgraphAdmin)
+	root.Handle("/v1/workgraphs/", workgraphAdmin)
+
 	// Channel-specific inbound authentication is enforced inside InboundHandler.
 	root.Handle("/v1/inbound/", pm.InboundHandler())
 	root.Handle("/", coreHandler)
 
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "enabled", "knowledge", "enabled", "cluster", "enabled", "evolution_control", "enabled")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "enabled", "knowledge", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
