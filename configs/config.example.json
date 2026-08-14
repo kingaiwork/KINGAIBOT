@@ -33,12 +33,34 @@
       "allow_insecure_http": false
     },
     {
+      "name": "anthropic-native",
+      "type": "anthropic",
+      "base_url": "https://api.anthropic.com",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "model": "replace-with-current-claude-model",
+      "priority": 20,
+      "enabled": false,
+      "allow_private_network": false,
+      "allow_insecure_http": false
+    },
+    {
+      "name": "gemini-native",
+      "type": "gemini",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "api_key_env": "GEMINI_API_KEY",
+      "model": "replace-with-current-gemini-model",
+      "priority": 30,
+      "enabled": false,
+      "allow_private_network": false,
+      "allow_insecure_http": false
+    },
+    {
       "name": "fallback-compatible",
       "type": "openai-compatible",
       "base_url": "https://example.invalid/v1",
       "api_key_env": "FALLBACK_API_KEY",
       "model": "replace-me",
-      "priority": 20,
+      "priority": 40,
       "enabled": false,
       "allow_private_network": false,
       "allow_insecure_http": false
@@ -72,7 +94,9 @@
       "knowledge_propose": "ask",
       "cluster_workers_list": "allow",
       "cluster_jobs_list": "allow",
-      "cluster_job_submit": "ask"
+      "cluster_job_submit": "ask",
+      "evolution_proposals_list": "allow",
+      "evolution_propose_improvement": "ask"
     },
     "shell_allowlist": [],
     "http_allowed_hosts": [
