@@ -161,7 +161,9 @@ func (m *Manager) StatusSnapshot() (*Status, error) {
 			continue
 		}
 		switch receipt.Status {
-		case "processing", "reconciliation":
+		case "processing":
+			counts["inbound_receipts_processing"]++
+		case "reconciliation":
 			counts["inbound_receipts_reconciliation"]++
 		case "failed":
 			counts["inbound_receipts_failed"]++
