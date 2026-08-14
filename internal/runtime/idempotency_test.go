@@ -53,6 +53,40 @@ func TestRecoverMovesInterruptedRunningTaskToReconciliationWithoutReplay(t *test
 	}
 }
 
+func TestRecoverMovesInterruptedCompletingTaskToReconciliationWithoutReplay(t *testing.T) {
+	r := bareRuntimeForCreateTest(t, 4)
+	interrupted := &task.Task{
+		ID:       "task_completing_restart",
+		Input:    "already produced output",
+		Output:   "durable output",
+		Provider: "test-provider",
+		Status:   task.Completing,
+		Attempts: 1,
+	}
+	if err := r.tasks.Save(interrupted); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(r.queue); got != 0 {
+		t.Fatalf("interrupted completing task was replayed: queue=%d", got)
+	}
+	stored, err := r.Task(interrupted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != task.Reconciliation {
+		t.Fatalf("interrupted completing task status=%s, want reconciliation", stored.Status)
+	}
+	if stored.Output != interrupted.Output || stored.Provider != interrupted.Provider {
+		t.Fatalf("completion evidence was lost during reconciliation: %#v", stored)
+	}
+	if !strings.Contains(stored.Error, "completion evidence is ambiguous") {
+		t.Fatalf("completion reconciliation reason missing: %q", stored.Error)
+	}
+}
+
 func TestRecoverRequeuesQueuedTask(t *testing.T) {
 	r := bareRuntimeForCreateTest(t, 4)
 	queued := &task.Task{ID: "task_queued_restart", Input: "not yet claimed", Status: task.Queued, Error: "stale", PendingApproval: "stale"}
