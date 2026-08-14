@@ -58,10 +58,10 @@ func New(ts *task.Store, as *approval.Store, el *eventlog.Log, ms *memory.Store,
 }
 
 // Recover is deliberately asymmetric. Queued means execution had not been
-// claimed, so it is safe to enqueue again. Running/Completing means the process
-// died after execution began or after output was produced; external side effects
-// may already have happened, so those tasks require reconciliation and are never
-// blindly replayed.
+// claimed, so it is safe to enqueue again. PendingAudit means the process died
+// while creation audit/activation was incomplete and cannot be proven safe.
+// Running/Completing means execution began or output was produced. All ambiguous
+// states require reconciliation and are never blindly replayed.
 func (r *Runtime) Recover() error {
 	ts, err := r.tasks.Recoverable()
 	if err != nil {
@@ -69,6 +69,22 @@ func (r *Runtime) Recover() error {
 	}
 	for _, t := range ts {
 		switch t.Status {
+		case task.PendingAudit:
+			updated, er := r.tasks.Update(t.ID, func(x *task.Task) error {
+				if x.Status != task.PendingAudit {
+					return nil
+				}
+				x.Status = task.Reconciliation
+				x.Error = "process restarted before task creation audit and activation could be proven; creation state is ambiguous"
+				x.PendingApproval = ""
+				return nil
+			})
+			if er != nil {
+				return er
+			}
+			if updated.Status == task.Reconciliation {
+				_ = r.events.Append(eventlog.Event{Type: "task.reconciliation_required", TaskID: t.ID, Data: map[string]any{"reason": "restart_during_creation_activation"}})
+			}
 		case task.Running, task.Completing:
 			previous := t.Status
 			updated, er := r.tasks.Update(t.ID, func(x *task.Task) error {
@@ -137,16 +153,17 @@ func copyTaskMetadata(meta map[string]any) map[string]any {
 	if meta == nil {
 		return map[string]any{}
 	}
-	out := make(map[string]any, len(meta)+2)
+	out := make(map[string]any, len(meta))
 	for k, v := range meta {
 		out[k] = v
 	}
 	return out
 }
 
-// activateNewTask enforces audit-before-queue. A crash before the task.created
-// audit leaves PendingAudit state, which Recover deliberately ignores. A crash
-// after the audited transition to Queued is recoverable and safe to enqueue.
+// activateNewTask enforces audit-before-queue. A crash before creation audit or
+// activation leaves PendingAudit state; recovery converts that ambiguity to
+// Reconciliation instead of executing it. A crash after the audited transition
+// to Queued is recoverable and safe to enqueue.
 func (r *Runtime) activateNewTask(t *task.Task, eventData map[string]any) (*task.Task, error) {
 	if err := r.events.Append(eventlog.Event{Type: "task.created", TaskID: t.ID, Data: eventData}); err != nil {
 		_, _ = r.tasks.Update(t.ID, func(x *task.Task) error {
