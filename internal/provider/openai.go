@@ -140,6 +140,19 @@ func (c *Client) Chat(ctx context.Context, messages []Message, tools []ToolDef) 
 }
 
 func (c *Client) chatOne(ctx context.Context, p config.Provider, key string, messages []Message, tools []ToolDef) (Message, bool, error) {
+	switch strings.ToLower(strings.TrimSpace(p.Type)) {
+	case "", "openai", "openai-compatible", "openai_compatible":
+		return c.chatOpenAICompatible(ctx, p, key, messages, tools)
+	case "anthropic", "claude":
+		return c.chatAnthropic(ctx, p, key, messages, tools)
+	case "gemini", "google", "google-gemini":
+		return c.chatGemini(ctx, p, key, messages, tools)
+	default:
+		return Message{}, false, fmt.Errorf("unsupported provider type %q", p.Type)
+	}
+}
+
+func (c *Client) chatOpenAICompatible(ctx context.Context, p config.Provider, key string, messages []Message, tools []ToolDef) (Message, bool, error) {
 	reqBody := ChatRequest{Model: p.Model, Messages: messages, Tools: tools, Temperature: 0}
 	b, err := json.Marshal(reqBody)
 	if err != nil {
