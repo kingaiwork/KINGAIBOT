@@ -6,6 +6,7 @@ KINGAIBOT is a long-term kingai.work project building a secure, durable and exte
 
 Start here:
 
+- [Enterprise Workforce Private Node](ENTERPRISE-WORKFORCE-NODE.md)
 - [Product Definition](PRODUCT.md)
 - [User & Operations Guide](USAGE.md)
 - [Long-Term Roadmap](ROADMAP.md)
@@ -33,6 +34,7 @@ KINGAIBOT 是 kingai.work 的长期研发项目，目标是构建 KING AI 智慧
 
 建议入口：
 
+- [企业数字员工私有运行节点](ENTERPRISE-WORKFORCE-NODE.md)
 - [产品定义](PRODUCT.md)
 - [使用与运维手册](USAGE.md)
 - [长期路线图](ROADMAP.md)
