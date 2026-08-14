@@ -45,13 +45,13 @@ func (m *Manager) httpIdentityEnabled(w http.ResponseWriter, r *http.Request) {
 }
 
 type accessKeyView struct {
-	ID         string     `json:"id"`
-	IdentityID string     `json:"identity_id"`
-	Prefix     string     `json:"prefix"`
-	CreatedAt  any        `json:"created_at"`
-	ExpiresAt  any        `json:"expires_at,omitempty"`
-	RevokedAt  any        `json:"revoked_at,omitempty"`
-	LastUsedAt any        `json:"last_used_at,omitempty"`
+	ID         string `json:"id"`
+	IdentityID string `json:"identity_id"`
+	Prefix     string `json:"prefix"`
+	CreatedAt  any    `json:"created_at"`
+	ExpiresAt  any    `json:"expires_at,omitempty"`
+	RevokedAt  any    `json:"revoked_at,omitempty"`
+	LastUsedAt any    `json:"last_used_at,omitempty"`
 }
 
 func viewAccessKey(k *AccessKey) map[string]any {
