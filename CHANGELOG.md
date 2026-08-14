@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.3.0 - 2026-08-14
+
+### English
+
+Platform expansion over the hardened v1.2 execution core:
+
+- Added a durable Platform Control Plane without weakening the existing policy, exact-approval, audit-integrity or fail-closed execution boundaries.
+- Added operator-defined agent profiles and durable sessions linked to runtime task IDs.
+- Added persistent recurring schedules with bounded intervals and persisted next-run state.
+- Added bounded sequential workflows with restart recovery and task-aware resume behavior.
+- Added parallel multi-agent missions with bounded fan-out and aggregated completion state.
+- Added device/browser/edge node registration, heartbeat state and policy-gated remote actions.
+- Added remote plugin manifests with SHA-256 identity and guarded network execution.
+- Added outbound channel adapters so messaging transports can remain outside the trusted daemon process.
+- Added integrity-hashed operator skills as instruction data without automatic authority escalation.
+- Added a generic extension-tool boundary so platform tools pass the same `allow / ask / deny`, canonical argument hash, exact approval, execution-state and audit pipeline as core tools.
+- Added authenticated `/v1/platform/*` administration APIs.
+- Added platform and extension-policy unit tests and fixed root binary ignore patterns that previously shadowed `cmd/kingagent*` source paths during automation.
+- Runtime version advanced to KINGAIBOT 1.3.0 while retaining the v1.2 hardened execution core as the trust foundation.
+
+### 中文
+
+在 V1.2 加固执行内核之上的完整平台扩展：
+
+- 新增持久化 Platform Control Plane，同时保持原有策略、精确审批、审计完整性和 Fail-Closed 安全边界不变。
+- 新增运营者定义的 Agent Profile 与绑定 Runtime Task ID 的持久会话。
+- 新增持久定时任务，带执行间隔边界和 `next_run_at` 持久状态。
+- 新增有界顺序工作流，支持服务重启后的任务感知恢复。
+- 新增并行多智能体 Mission，限制扇出数量并聚合子任务状态。
+- 新增桌面 / 浏览器 / 移动 / Edge 节点注册、心跳状态与受策略控制的远程动作。
+- 新增带 SHA-256 身份的远程插件清单，并通过安全网络边界执行。
+- 新增出站 Channel Adapter，使 Telegram / Discord / Slack / Email / WebChat 等适配器可以保持在可信核心进程之外。
+- 新增内容完整性哈希的 Skill 数据；Skill 本身不会自动获得系统权限。
+- 新增统一扩展工具边界，使平台工具与核心工具一样经过 `allow / ask / deny`、规范参数哈希、精确审批、执行状态和审计链。
+- 新增受 Admin Token 保护的 `/v1/platform/*` 管理 API。
+- 新增平台与扩展审批单元测试，并修复 `.gitignore` 根目录二进制规则误覆盖 `cmd/kingagent*` 源码目录的问题。
+- Runtime 版本升级为 KINGAIBOT 1.3.0，V1.2 的加固执行核继续作为信任根。
+
 ## 1.2.0 - 2026-08-12
 
 ### English
