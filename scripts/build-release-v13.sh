@@ -50,7 +50,10 @@ PY
 }
 
 build_target() {
-  local goos="$1" goarch="$2" ext="" stage="$DIST/.stage_${goos}_${goarch}"
+  local goos="$1"
+  local goarch="$2"
+  local ext=""
+  local stage="$DIST/.stage_${goos}_${goarch}"
   [[ "$goos" == "windows" ]] && ext=".exe"
   mkdir -p "$stage"
 
