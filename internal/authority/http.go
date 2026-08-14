@@ -17,10 +17,28 @@ type checkRequest struct {
 	Tool       string `json:"tool,omitempty"`
 }
 
+type preflightRequest struct {
+	CostUnits int64 `json:"cost_units,omitempty"`
+}
+
 func (s *Store) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
 		parts := splitAuthorityPath(r.URL.Path)
+		if len(parts) == 2 && parts[0] == "authority" && parts[1] == "usage" {
+			if r.Method != http.MethodGet {
+				writeAuthorityError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			usage, err := s.UsageOverview()
+			if err != nil {
+				writeAuthorityStoreError(w, err)
+				return
+			}
+			writeAuthorityJSON(w, http.StatusOK, map[string]any{"usage": usage})
+			return
+		}
 		if len(parts) == 2 && parts[0] == "authority" && parts[1] == "envelopes" {
 			s.handleAuthorityRoot(w, r)
 			return
@@ -59,6 +77,24 @@ func (s *Store) Handler() http.Handler {
 				return
 			}
 			writeAuthorityJSON(w, http.StatusOK, usage)
+			return
+		}
+		if parts[3] == "preflight" {
+			if r.Method != http.MethodPost {
+				writeAuthorityError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			var req preflightRequest
+			if err := decodeAuthorityJSON(r, &req); err != nil {
+				writeAuthorityError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			result, err := s.Preflight(id, req.CostUnits)
+			if err != nil {
+				writeAuthorityStoreError(w, err)
+				return
+			}
+			writeAuthorityJSON(w, http.StatusOK, result)
 			return
 		}
 		if r.Method != http.MethodPost {
@@ -161,7 +197,7 @@ func writeAuthorityStoreError(w http.ResponseWriter, err error) {
 		return
 	}
 	message := err.Error()
-	if strings.Contains(message, "budget exhausted") {
+	if strings.Contains(message, "budget exhausted") || strings.Contains(message, "no concurrent-work capacity") || strings.Contains(message, "lacks") {
 		writeAuthorityError(w, http.StatusConflict, message)
 		return
 	}
@@ -174,7 +210,8 @@ func writeAuthorityStoreError(w http.ResponseWriter, err error) {
 		strings.Contains(message, "revoked") ||
 		strings.Contains(message, "not active") ||
 		strings.Contains(message, "delegation") ||
-		strings.Contains(message, "effective") {
+		strings.Contains(message, "effective") ||
+		strings.Contains(message, "cost_units") {
 		writeAuthorityError(w, http.StatusBadRequest, message)
 		return
 	}
