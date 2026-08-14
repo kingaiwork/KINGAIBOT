@@ -7,13 +7,20 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/kingaiwork/KINGAIBOT/internal/memory"
 	"github.com/kingaiwork/KINGAIBOT/internal/storage"
 	"github.com/kingaiwork/KINGAIBOT/internal/task"
 )
 
-const missionDispatchStatusV14 = "dispatching_v14"
+const (
+	missionDispatchStatusV14 = "dispatching_v14"
+	missionRunningStatusV14  = "running_v14"
+)
+
+var missionSyncV14Loops sync.Map // map[*Manager]struct{}
 
 func missionTaskIdempotencyKey(missionID string, index int, agentID string) string {
 	return fmt.Sprintf("king-mission:%s:task:%d:%s", missionID, index, agentID)
@@ -100,6 +107,9 @@ func (m *Manager) DispatchMissionV14(in Mission) (*Mission, error) {
 }
 
 func (m *Manager) missionReconciliationV14(mission *Mission, index int, reason string) (*Mission, error) {
+	if mission == nil {
+		return nil, errors.New("mission required")
+	}
 	mission.Status = "reconciliation"
 	mission.UpdatedAt = now()
 	if index >= 0 && index < len(mission.Tasks) {
@@ -171,6 +181,8 @@ func (m *Manager) resumeMissionDispatchV14(missionID string) (*Mission, error) {
 				return m.missionReconciliationV14(&mission, index, "linked mission task requires reconciliation: "+verifyErr.Error())
 			}
 			mission.Tasks[index].Status = string(current.Status)
+			mission.Tasks[index].Output = current.Output
+			mission.Tasks[index].Error = current.Error
 			continue
 		}
 		prompt, err := m.missionPromptV14(mission.Objective, agentID)
@@ -189,7 +201,8 @@ func (m *Manager) resumeMissionDispatchV14(missionID string) (*Mission, error) {
 		}
 		mission.Tasks[index].TaskID = created.ID
 		mission.Tasks[index].Status = string(created.Status)
-		mission.Tasks[index].Error = ""
+		mission.Tasks[index].Output = created.Output
+		mission.Tasks[index].Error = created.Error
 		mission.UpdatedAt = now()
 		m.mu.Lock()
 		err = m.save("missions", mission.ID, &mission)
@@ -206,7 +219,7 @@ func (m *Manager) resumeMissionDispatchV14(missionID string) (*Mission, error) {
 	if err := m.audit("mission.v14.dispatched", map[string]any{"mission_id": mission.ID, "tasks": len(mission.Tasks), "mode": mission.Mode}); err != nil {
 		return m.missionReconciliationV14(&mission, -1, "mission dispatch completion audit failed: "+err.Error())
 	}
-	mission.Status = "running"
+	mission.Status = missionRunningStatusV14
 	mission.UpdatedAt = now()
 	m.mu.Lock()
 	err = m.save("missions", mission.ID, &mission)
@@ -217,9 +230,174 @@ func (m *Manager) resumeMissionDispatchV14(missionID string) (*Mission, error) {
 	return &mission, nil
 }
 
-// RecoverMissionsV14 resumes only partially-dispatched v1.4 missions. Once a
-// mission reaches ordinary running state, the existing mission result synchronizer
-// can safely track its already-linked child Task IDs.
+// syncMissionV14 owns the full post-dispatch lifecycle for V14 missions. It is
+// intentionally separate from the compatibility syncMission implementation so
+// Runtime ambiguity is explicit and the two synchronizers never write the same
+// running state.
+func (m *Manager) syncMissionV14(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var mission Mission
+	if err := m.read("missions", id, &mission); err != nil {
+		return err
+	}
+	if mission.Status != missionRunningStatusV14 {
+		return nil
+	}
+	terminal := true
+	failed := false
+	for index := range mission.Tasks {
+		child := &mission.Tasks[index]
+		if strings.TrimSpace(child.TaskID) == "" {
+			mission.Status = "reconciliation"
+			child.Status = "reconciliation"
+			child.Error = "v1.4 mission child task id is missing"
+			mission.UpdatedAt = now()
+			if err := m.save("missions", id, &mission); err != nil {
+				return err
+			}
+			_ = m.audit("mission.v14.reconciliation", map[string]any{"mission_id": id, "task_index": index, "reason": child.Error})
+			return nil
+		}
+		current, err := m.rt.Task(child.TaskID)
+		if err != nil {
+			mission.Status = "reconciliation"
+			child.Status = "reconciliation"
+			child.Error = memory.SanitizeContent("v1.4 mission child lookup failed: " + err.Error())
+			mission.UpdatedAt = now()
+			if saveErr := m.save("missions", id, &mission); saveErr != nil {
+				return saveErr
+			}
+			_ = m.audit("mission.v14.reconciliation", map[string]any{"mission_id": id, "task_index": index, "reason": child.Error})
+			return nil
+		}
+		child.Status = string(current.Status)
+		child.Output = current.Output
+		child.Error = current.Error
+		switch current.Status {
+		case task.PendingAudit, task.Reconciliation:
+			mission.Status = "reconciliation"
+			child.Status = "reconciliation"
+			if child.Error == "" {
+				child.Error = fmt.Sprintf("child task %s is %s", current.ID, current.Status)
+			}
+			mission.UpdatedAt = now()
+			if err := m.save("missions", id, &mission); err != nil {
+				return err
+			}
+			_ = m.audit("mission.v14.reconciliation", map[string]any{"mission_id": id, "task_index": index, "reason": child.Error})
+			return nil
+		case task.Completed:
+			// terminal success for this child
+		case task.Failed, task.Canceled:
+			failed = true
+		case task.Queued, task.Running, task.WaitingApproval, task.Completing:
+			terminal = false
+		default:
+			mission.Status = "reconciliation"
+			child.Status = "reconciliation"
+			child.Error = fmt.Sprintf("child task %s has unknown state %s", current.ID, current.Status)
+			mission.UpdatedAt = now()
+			if err := m.save("missions", id, &mission); err != nil {
+				return err
+			}
+			_ = m.audit("mission.v14.reconciliation", map[string]any{"mission_id": id, "task_index": index, "reason": child.Error})
+			return nil
+		}
+	}
+	mission.UpdatedAt = now()
+	if !terminal {
+		return m.save("missions", id, &mission)
+	}
+	done := now()
+	mission.DoneAt = &done
+	if failed {
+		mission.Status = "partial_failure"
+		if err := m.save("missions", id, &mission); err != nil {
+			return err
+		}
+		_ = m.audit("mission.v14.partial_failure", map[string]any{"mission_id": id})
+		return nil
+	}
+	// Success is trust-increasing: audit it before exposing completed state.
+	if err := m.audit("mission.v14.completed", map[string]any{"mission_id": id, "tasks": len(mission.Tasks)}); err != nil {
+		mission.Status = "reconciliation"
+		mission.DoneAt = nil
+		mission.UpdatedAt = now()
+		mission.Tasks[0].Error = memory.SanitizeContent("mission completion audit failed: " + err.Error())
+		return m.save("missions", id, &mission)
+	}
+	mission.Status = "completed"
+	return m.save("missions", id, &mission)
+}
+
+func (m *Manager) MissionV14(id string) (*Mission, error) {
+	if err := m.syncMissionV14(id); err != nil {
+		return nil, err
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var mission Mission
+	if err := m.read("missions", id, &mission); err != nil {
+		return nil, err
+	}
+	return &mission, nil
+}
+
+func (m *Manager) MissionsV14() ([]*Mission, error) {
+	m.mu.RLock()
+	all, err := listJSON[Mission](filepath.Join(m.dir, "missions"))
+	m.mu.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	for _, mission := range all {
+		if mission != nil && mission.Status == missionRunningStatusV14 {
+			_ = m.syncMissionV14(mission.ID)
+		}
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return listJSON[Mission](filepath.Join(m.dir, "missions"))
+}
+
+func (m *Manager) syncRunningMissionsV14() {
+	m.mu.RLock()
+	missions, err := listJSON[Mission](filepath.Join(m.dir, "missions"))
+	m.mu.RUnlock()
+	if err != nil {
+		return
+	}
+	for _, mission := range missions {
+		if mission != nil && mission.Status == missionRunningStatusV14 {
+			_ = m.syncMissionV14(mission.ID)
+		}
+	}
+}
+
+func (m *Manager) startMissionSyncV14() {
+	if _, loaded := missionSyncV14Loops.LoadOrStore(m, struct{}{}); loaded {
+		return
+	}
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		ticker := time.NewTicker(m.tick)
+		defer ticker.Stop()
+		defer missionSyncV14Loops.Delete(m)
+		for {
+			select {
+			case <-m.ctx.Done():
+				return
+			case <-ticker.C:
+				m.syncRunningMissionsV14()
+			}
+		}
+	}()
+}
+
+// RecoverMissionsV14 resumes only partially-dispatched V14 missions. Running
+// V14 missions are handled by the dedicated reconciliation-aware synchronizer.
 func (m *Manager) RecoverMissionsV14() {
 	m.mu.RLock()
 	missions, err := listJSON[Mission](filepath.Join(m.dir, "missions"))
@@ -228,12 +406,17 @@ func (m *Manager) RecoverMissionsV14() {
 		return
 	}
 	for _, mission := range missions {
-		if mission == nil || mission.Status != missionDispatchStatusV14 {
+		if mission == nil {
 			continue
 		}
-		if err := m.audit("mission.v14.recovery_authorized", map[string]any{"mission_id": mission.ID}); err != nil {
-			continue
+		switch mission.Status {
+		case missionDispatchStatusV14:
+			if err := m.audit("mission.v14.recovery_authorized", map[string]any{"mission_id": mission.ID}); err != nil {
+				continue
+			}
+			_, _ = m.resumeMissionDispatchV14(mission.ID)
+		case missionRunningStatusV14:
+			_ = m.syncMissionV14(mission.ID)
 		}
-		_, _ = m.resumeMissionDispatchV14(mission.ID)
 	}
 }
