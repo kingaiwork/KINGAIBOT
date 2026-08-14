@@ -131,6 +131,25 @@ Reviewed knowledge graph:
 - agent can propose knowledge but cannot self-approve it
 - admin review API separated from read API
 
+#### Capability Envelope + WorkGraph Orchestration
+
+KINGAIBOT now has a durable execution-authority and work-state layer that remains outside model control:
+
+- Capability Envelopes can bound capabilities, data scopes, tools, budgets, expiry and delegation depth.
+- Delegation may only narrow authority; parent revocation or expiry invalidates descendants.
+- Trusted platform-created tasks resolve authority from trusted Agent identity. The model cannot select an `authority_id` in tool arguments.
+- Durable WorkGraphs represent typed DAG work with approval gates, replay policy and evidence requirements.
+- High/critical risk WorkGraph nodes cannot complete without evidence.
+- WorkGraph execute/delegate nodes can be handed to Cluster through the Admin-only orchestration bridge.
+- Cluster uses a native `held` Job state so a remote Worker cannot lease work before the corresponding WorkGraph node is durably running and activation is audited.
+- Authority is revalidated at job submission, before lease delivery and before completion commit.
+- Authority loss during remote execution retains the Worker result and moves the Job/WorkGraph into reconciliation instead of accepting false completion.
+- Admin reconciliation can record already-observed reality, while `requeue` still requires effective execution authority.
+- Cluster completion is propagated back to WorkGraph with Job identity and result SHA-256 evidence.
+- Persistent orchestration bindings support restart recovery and fail-closed orphan-held-job cleanup.
+
+The detailed state machine and API contract are documented in [`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md).
+
 #### Multi-node worker runtime
 
 The cluster coordinator provides durable remote execution primitives:
@@ -214,7 +233,7 @@ The Control Center keeps its entered token in page memory only; it does not inte
 
 ### Important Scope Boundary
 
-KINGAIBOT v1.3 provides the platform primitives required for broad agent-system coverage: sessions, schedules, workflows, multi-agent missions, skills, plugins, channels, long-term knowledge, device/worker coordination, provider diversity, MCP/A2A and controlled evolution.
+KINGAIBOT v1.3 provides the platform primitives required for broad agent-system coverage: sessions, schedules, workflows, multi-agent missions, skills, plugins, channels, long-term knowledge, device/worker coordination, provider diversity, MCP/A2A, authority-bound WorkGraph orchestration and controlled evolution.
 
 That is different from claiming that every vendor-specific transport or device driver is bundled in the trusted core. For example, Telegram, WhatsApp, Slack, Chromium/CDP, Android and iOS can be connected through adapters, MCP, plugins or capability-scoped workers. Keeping those integrations outside the trust root is intentional and reduces supply-chain and privilege risk.
 
@@ -312,6 +331,8 @@ For production, prefer a reviewed immutable signed release/tag rather than insta
 
 - [Documentation Index](docs/README.md)
 - [V1.3 Platform](docs/PLATFORM.md)
+- [Authority-Bound Orchestration](docs/ORCHESTRATION.md)
+- [Clean-Room Originality & IP Policy](docs/ORIGINALITY_IP_POLICY.md)
 - [Product Definition](docs/PRODUCT.md)
 - [User & Operations Guide](docs/USAGE.md)
 - [Long-Term Roadmap](docs/ROADMAP.md)
@@ -433,7 +454,26 @@ Knowledge Graph：
 - Agent 可以提议知识，但不能自己批准
 - 普通读取 API 与 Admin 审核 API 完全分离
 
-### 7. 多节点 Cluster Worker
+### 7. Capability Envelope + WorkGraph 原创建模与编排
+
+KINGAIBOT 已加入独立于模型的持久执行权限和工作状态层：
+
+- Capability Envelope 可以限制 Capability、数据范围、工具范围、预算、过期时间和委派深度。
+- 子授权只能缩小父授权；父授权吊销或过期后，所有后代授权立即失效。
+- 平台可信创建的 Task 从 Agent 身份解析 Authority；模型工具参数不能自行选择 `authority_id`。
+- WorkGraph 使用 Typed DAG 表达持久工作，支持审批、Replay Policy 和 Evidence Requirement。
+- High / Critical 风险节点没有 Evidence 不能完成。
+- `execute / delegate` Node 可以通过 Admin-only Orchestration Bridge 派发给 Cluster。
+- Cluster 新增 `held` Job：在 WorkGraph Node 没有持久进入 Running 且激活审计没有完成前，任何 Worker 都租不到该 Job。
+- Job 提交、Lease 发放、Result 提交都会重新校验 Authority。
+- 执行途中撤权时，Worker Result 会保留，但 Job 与 WorkGraph 进入 reconciliation，不能假完成。
+- Admin 可以核验并记录已经发生的真实结果，但 `requeue` 仍要求当前 Authority 有效。
+- Cluster 完成结果会把 Job ID 与 Result SHA-256 作为 Evidence 回写 WorkGraph。
+- 持久 Orchestration Binding 支持重启恢复，并 Fail-Closed 清理无法证明有合法 Binding 的 orphan held Job。
+
+完整状态机与接口见 [`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md)。
+
+### 8. 多节点 Cluster Worker
 
 - Worker 独立一次性凭据
 - 只保存凭据哈希
@@ -459,7 +499,7 @@ Knowledge Graph：
 
 不默认开放 Shell。
 
-### 8. 多智能体 Mission
+### 9. 多智能体 Mission
 
 - 多 Agent 并行派发
 - 有界 Fan-out
@@ -469,7 +509,7 @@ Knowledge Graph：
 
 这提供 Swarm 风格协作能力，但不允许递归权限升级。
 
-### 9. 受控进化状态机
+### 10. 受控进化状态机
 
 生产 Runtime 仍然不能因为模型一句话就修改和部署自己。
 
@@ -496,7 +536,7 @@ Release 必须记录：
 
 Agent 只有“查看 / 提议”的工具；Approve / Stage / Release / Rollback 只属于 Admin 控制面。
 
-### 10. MCP / A2A / Plugin / Worker 开放协议
+### 11. MCP / A2A / Plugin / Worker 开放协议
 
 - MCP Server
 - Remote MCP Bridge
@@ -509,7 +549,7 @@ Agent 只有“查看 / 提议”的工具；Approve / Stage / Release / Rollbac
 
 扩展能力不需要把第三方代码直接装进可信 daemon 进程。
 
-### 11. Control Center
+### 12. Control Center
 
 新增 `kingconsole`：
 
@@ -519,7 +559,7 @@ Agent 只有“查看 / 提议”的工具；Approve / Stage / Release / Rollbac
 - 通过受限同源代理访问 `kingagentd`
 - 页面输入 Token 仅保存在当前页面内存，不主动写入浏览器持久存储
 
-### 12. 四个正式程序
+### 13. 四个正式程序
 
 - `kingagentd`：核心 daemon + 平台 API
 - `kingagent`：命令行操作端
@@ -528,7 +568,7 @@ Agent 只有“查看 / 提议”的工具；Approve / Stage / Release / Rollbac
 
 ## 关于“覆盖 OpenClaw 类平台功能”的准确边界
 
-v1.3 已经建立会话、自动化、工作流、Skill、Plugin、Channel、多智能体、设备/Worker、长期知识、Provider Fabric、MCP/A2A、控制台和受控进化等**平台级基础能力**。
+v1.3 已经建立会话、自动化、工作流、Skill、Plugin、Channel、多智能体、设备/Worker、长期知识、Provider Fabric、MCP/A2A、Capability Envelope、WorkGraph、Authority-bound Orchestration、控制台和受控进化等**平台级基础能力**。
 
 但“平台具备适配能力”不等于“把全球所有第三方厂商驱动都硬编码进核心”。例如 Telegram / WhatsApp / Slack / Chromium/CDP / Android / iOS 的具体实现应继续通过受限 Adapter、Plugin、MCP 或 Worker 扩展。这样做不是少功能，而是避免第三方 SDK 和高权限设备控制直接进入 KINGAIBOT 信任根。
 
