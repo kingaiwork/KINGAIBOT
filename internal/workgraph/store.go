@@ -20,9 +20,10 @@ const (
 	maxNodesPerGraph  = 256
 )
 
-// Store persists KINGAIBOT WorkGraphs independently from model context. All
-// trust-changing transitions are audited and rolled back if audit persistence
-// fails, so model output alone can never make a privileged state durable.
+// Store persists KINGAIBOT WorkGraphs independently from model context. Trust-
+// expanding transitions are audited before they become durable; fail-closed
+// transitions become durable before audit and are never rolled back into a more
+// executable state merely because the audit sink is unhealthy.
 type Store struct {
 	dir    string
 	events *eventlog.Log
@@ -114,6 +115,7 @@ func (s *Store) countLocked() (int, error) {
 
 // Create accepts nodes in any order. Dependencies are resolved before each Add,
 // and the request fails if the graph contains unknown dependencies or a cycle.
+// The creation audit is durable before the graph becomes visible to dispatchers.
 func (s *Store) Create(objective string, nodes []Node) (*Graph, error) {
 	objective = strings.TrimSpace(objective)
 	if objective == "" {
@@ -160,23 +162,17 @@ func (s *Store) Create(objective string, nodes []Node) (*Graph, error) {
 	}
 
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if n, countErr := s.countLocked(); countErr != nil {
-		s.mu.Unlock()
 		return nil, countErr
 	} else if n >= maxGraphsPerStore {
-		s.mu.Unlock()
 		return nil, errors.New("workgraph store limit reached")
 	}
-	if err := s.saveLocked(g); err != nil {
-		s.mu.Unlock()
-		return nil, err
-	}
-	path, _ := s.graphPath(g.ID)
-	s.mu.Unlock()
-
 	if err := s.events.Append(eventlog.Event{Type: "workgraph.created", Data: map[string]any{"workgraph_id": g.ID, "nodes": len(g.Nodes)}}); err != nil {
-		_ = os.Remove(path)
-		return nil, fmt.Errorf("workgraph creation rolled back because audit failed: %w", err)
+		return nil, fmt.Errorf("workgraph creation blocked because audit failed: %w", err)
+	}
+	if err := s.saveLocked(g); err != nil {
+		return nil, fmt.Errorf("workgraph creation was audited but persistence failed: %w", err)
 	}
 	return cloneGraph(g)
 }
@@ -216,7 +212,14 @@ func (s *Store) List() ([]*Graph, error) {
 
 type transitionFn func(*Graph) (map[string]any, error)
 
-func (s *Store) transition(id, eventType string, fn transitionFn) (*Graph, error) {
+// transition applies one of two persistence orders:
+//
+//   - auditFirst=true for transitions that make work more executable or assert
+//     successful completion. Audit must be durable before that state is visible.
+//   - auditFirst=false for fail-closed transitions such as failed/reconciling.
+//     The safer state is persisted first and is never rolled back to a more
+//     executable state if audit persistence subsequently fails.
+func (s *Store) transition(id, eventType string, auditFirst bool, fn transitionFn) (*Graph, error) {
 	if fn == nil {
 		return nil, errors.New("transition required")
 	}
@@ -238,31 +241,37 @@ func (s *Store) transition(id, eventType string, fn transitionFn) (*Graph, error
 	if err := candidate.Validate(); err != nil {
 		return nil, err
 	}
-	if err := s.saveLocked(candidate); err != nil {
-		return nil, err
-	}
 	if data == nil {
 		data = map[string]any{}
 	}
 	data["workgraph_id"] = candidate.ID
-	if err := s.events.Append(eventlog.Event{Type: eventType, Data: data}); err != nil {
-		if rollbackErr := s.saveLocked(original); rollbackErr != nil {
-			return nil, fmt.Errorf("audit failed and rollback failed: audit=%v rollback=%w", err, rollbackErr)
+	if auditFirst {
+		if err := s.events.Append(eventlog.Event{Type: eventType, Data: data}); err != nil {
+			return nil, fmt.Errorf("workgraph transition blocked because audit failed: %w", err)
 		}
-		return nil, fmt.Errorf("workgraph transition rolled back because audit failed: %w", err)
+		if err := s.saveLocked(candidate); err != nil {
+			return nil, fmt.Errorf("workgraph transition was audited but persistence failed: %w", err)
+		}
+		return cloneGraph(candidate)
+	}
+	if err := s.saveLocked(candidate); err != nil {
+		return nil, err
+	}
+	if err := s.events.Append(eventlog.Event{Type: eventType, Data: data}); err != nil {
+		return nil, fmt.Errorf("workgraph fail-closed transition persisted but audit failed: %w", err)
 	}
 	return cloneGraph(candidate)
 }
 
 func (s *Store) Refresh(id string) (*Graph, error) {
-	return s.transition(id, "workgraph.refreshed", func(g *Graph) (map[string]any, error) {
+	return s.transition(id, "workgraph.refreshed", true, func(g *Graph) (map[string]any, error) {
 		ready := g.Refresh(time.Now().UTC())
 		return map[string]any{"ready_nodes": ready}, nil
 	})
 }
 
 func (s *Store) Approve(id, nodeID string) (*Graph, error) {
-	return s.transition(id, "workgraph.node.approved", func(g *Graph) (map[string]any, error) {
+	return s.transition(id, "workgraph.node.approved", true, func(g *Graph) (map[string]any, error) {
 		if err := g.Approve(nodeID, time.Now().UTC()); err != nil {
 			return nil, err
 		}
@@ -271,7 +280,7 @@ func (s *Store) Approve(id, nodeID string) (*Graph, error) {
 }
 
 func (s *Store) Start(id, nodeID string) (*Graph, error) {
-	return s.transition(id, "workgraph.node.started", func(g *Graph) (map[string]any, error) {
+	return s.transition(id, "workgraph.node.started", true, func(g *Graph) (map[string]any, error) {
 		if err := g.Start(nodeID, time.Now().UTC()); err != nil {
 			return nil, err
 		}
@@ -280,7 +289,7 @@ func (s *Store) Start(id, nodeID string) (*Graph, error) {
 }
 
 func (s *Store) AbortUnleased(id, nodeID, reason string) (*Graph, error) {
-	return s.transition(id, "workgraph.node.dispatch_aborted", func(g *Graph) (map[string]any, error) {
+	return s.transition(id, "workgraph.node.dispatch_aborted", true, func(g *Graph) (map[string]any, error) {
 		if err := g.AbortUnleasedStart(nodeID, reason, time.Now().UTC()); err != nil {
 			return nil, err
 		}
@@ -289,7 +298,7 @@ func (s *Store) AbortUnleased(id, nodeID, reason string) (*Graph, error) {
 }
 
 func (s *Store) RequireReconciliation(id, nodeID, reason string) (*Graph, error) {
-	return s.transition(id, "workgraph.node.reconciliation_required", func(g *Graph) (map[string]any, error) {
+	return s.transition(id, "workgraph.node.reconciliation_required", false, func(g *Graph) (map[string]any, error) {
 		if err := g.RequireReconciliation(nodeID, reason, time.Now().UTC()); err != nil {
 			return nil, err
 		}
@@ -298,7 +307,7 @@ func (s *Store) RequireReconciliation(id, nodeID, reason string) (*Graph, error)
 }
 
 func (s *Store) ResumeReconciliation(id, nodeID string) (*Graph, error) {
-	return s.transition(id, "workgraph.node.reconciliation_resumed", func(g *Graph) (map[string]any, error) {
+	return s.transition(id, "workgraph.node.reconciliation_resumed", true, func(g *Graph) (map[string]any, error) {
 		if err := g.ResumeReconciliation(nodeID, time.Now().UTC()); err != nil {
 			return nil, err
 		}
@@ -307,7 +316,7 @@ func (s *Store) ResumeReconciliation(id, nodeID string) (*Graph, error) {
 }
 
 func (s *Store) Fail(id, nodeID, reason string) (*Graph, error) {
-	return s.transition(id, "workgraph.node.failed", func(g *Graph) (map[string]any, error) {
+	return s.transition(id, "workgraph.node.failed", false, func(g *Graph) (map[string]any, error) {
 		if err := g.Fail(nodeID, reason, time.Now().UTC()); err != nil {
 			return nil, err
 		}
@@ -316,7 +325,7 @@ func (s *Store) Fail(id, nodeID, reason string) (*Graph, error) {
 }
 
 func (s *Store) Complete(id, nodeID string, outputs map[string]any, evidence []Evidence) (*Graph, error) {
-	return s.transition(id, "workgraph.node.completed", func(g *Graph) (map[string]any, error) {
+	return s.transition(id, "workgraph.node.completed", true, func(g *Graph) (map[string]any, error) {
 		if err := g.Complete(nodeID, outputs, evidence, time.Now().UTC()); err != nil {
 			return nil, err
 		}
@@ -329,7 +338,18 @@ func (s *Store) Ambiguous(id, nodeID, reason string) (*Graph, error) {
 	if reason == "" {
 		return nil, errors.New("reason required")
 	}
-	return s.transition(id, "workgraph.node.ambiguous", func(g *Graph) (map[string]any, error) {
+	current, err := s.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	node, ok := current.Nodes[strings.TrimSpace(nodeID)]
+	if !ok || node == nil {
+		return nil, errors.New("work node not found")
+	}
+	// ReplaySafe moves Running back toward executable work and therefore audits
+	// first. Manual/Never move into reconciliation/failed and persist fail-closed.
+	auditFirst := node.Replay == ReplaySafe
+	return s.transition(id, "workgraph.node.ambiguous", auditFirst, func(g *Graph) (map[string]any, error) {
 		if err := g.AmbiguousSideEffect(nodeID, reason, time.Now().UTC()); err != nil {
 			return nil, err
 		}
