@@ -18,6 +18,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/config"
 	"github.com/kingaiwork/KINGAIBOT/internal/eventlog"
 	"github.com/kingaiwork/KINGAIBOT/internal/evolution"
+	"github.com/kingaiwork/KINGAIBOT/internal/knowledge"
 	"github.com/kingaiwork/KINGAIBOT/internal/memory"
 	"github.com/kingaiwork/KINGAIBOT/internal/platform"
 	"github.com/kingaiwork/KINGAIBOT/internal/policy"
@@ -65,6 +66,10 @@ func main() {
 	defer pm.Close()
 	tr.RegisterExtension(pm)
 
+	ks, mustErr := knowledge.New(filepath.Join(cfg.Runtime.DataDir, "knowledge"), el)
+	must(mustErr)
+	tr.RegisterExtension(ks)
+
 	must(rt.Recover())
 
 	coreHandler := api.New(cfg, rt, tr).Handler()
@@ -83,13 +88,20 @@ func main() {
 	root.Handle("/v1/platform/metrics", statusScoped)
 	root.Handle("/v1/platform/", platformScoped)
 
+	// Reviewed knowledge is readable by scoped users. Creating/reviewing durable
+	// long-term knowledge remains an administrative trust decision.
+	knowledgeRead := pm.ScopedAuthHandler(cfg.Server.AdminTokenEnv, ks.Handler())
+	knowledgeAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, ks.Handler())
+	root.Handle("GET /v1/knowledge/", knowledgeRead)
+	root.Handle("POST /v1/knowledge/", knowledgeAdmin)
+
 	// Channel-specific inbound authentication is enforced inside InboundHandler.
 	root.Handle("/v1/inbound/", pm.InboundHandler())
 	root.Handle("/", coreHandler)
 
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "enabled")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "enabled", "knowledge", "enabled")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
