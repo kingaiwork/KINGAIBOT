@@ -28,6 +28,7 @@ type JobAuthorityBinding struct {
 	RequiredCapabilities []string  `json:"required_capabilities,omitempty"`
 	RequiredDataScopes   []string  `json:"required_data_scopes,omitempty"`
 	RequiredTool         string    `json:"required_tool,omitempty"`
+	CostUnits            int64     `json:"cost_units,omitempty"`
 	CreatedAt            time.Time `json:"created_at"`
 }
 
@@ -38,6 +39,7 @@ type AuthorizedJobRequest struct {
 	AuthorityID        string   `json:"authority_id,omitempty"`
 	RequiredDataScopes []string `json:"required_data_scopes,omitempty"`
 	RequiredTool       string   `json:"required_tool,omitempty"`
+	CostUnits          int64    `json:"cost_units,omitempty"`
 }
 
 var coordinatorAuthority sync.Map
@@ -127,6 +129,9 @@ func (c *Coordinator) loadAuthorityBinding(jobID string) (*JobAuthorityBinding, 
 	if binding.JobID != jobID || strings.TrimSpace(binding.AuthorityID) == "" {
 		return nil, errors.New("invalid job authority binding")
 	}
+	if _, err := normalizeCostUnits(binding.CostUnits); err != nil {
+		return nil, err
+	}
 	return &binding, nil
 }
 
@@ -157,55 +162,50 @@ func (c *Coordinator) authorizeBinding(binding *JobAuthorityBinding) error {
 }
 
 func (c *Coordinator) SubmitAuthorized(in Job, authorityID string, dataScopes []string, requiredTool string) (*Job, error) {
-	checker := c.authorityChecker()
-	if checker == nil {
+	return c.SubmitAuthorizedBudgeted(in, authorityID, dataScopes, requiredTool, 0)
+}
+
+// SubmitAuthorizedBudgeted uses the same held-job handoff as WorkGraph
+// orchestration. The job cannot become leaseable until authority, trusted cost
+// and hierarchical concurrent-work reservation are all durable.
+func (c *Coordinator) SubmitAuthorizedBudgeted(in Job, authorityID string, dataScopes []string, requiredTool string, costUnits int64) (*Job, error) {
+	if c.authorityChecker() == nil {
 		return c.Submit(in)
 	}
-	authorityID = strings.TrimSpace(authorityID)
-	if authorityID == "" {
-		return nil, errors.New("authority_id required for cluster job submission")
-	}
-	normalized, err := normalizeJob(in)
+	costUnits, err := normalizeCostUnits(costUnits)
 	if err != nil {
 		return nil, err
 	}
-	dataScopes, err = normalizeDataScopes(dataScopes)
+	controlRef, err := storage.RandomID("submit")
 	if err != nil {
 		return nil, err
 	}
-	requiredTool = strings.TrimSpace(requiredTool)
-	if len(requiredTool) > 256 {
-		return nil, errors.New("required_tool must be <= 256 bytes")
-	}
-	if len(normalized.RequiredCapabilities) == 0 && len(dataScopes) == 0 && requiredTool == "" {
-		return nil, errors.New("authority-bound job must declare a required capability, data scope or tool")
-	}
-	binding := &JobAuthorityBinding{
-		AuthorityID:          authorityID,
-		RequiredCapabilities: append([]string(nil), normalized.RequiredCapabilities...),
-		RequiredDataScopes:   append([]string(nil), dataScopes...),
-		RequiredTool:         requiredTool,
-		CreatedAt:            time.Now().UTC(),
-	}
-	if err := c.authorizeBinding(binding); err != nil {
-		return nil, fmt.Errorf("cluster job authority denied: %w", err)
-	}
-	job, err := c.Submit(normalized)
+	held, err := c.SubmitHeldAuthorized(in, authorityID, dataScopes, requiredTool, controlRef)
 	if err != nil {
 		return nil, err
 	}
-	binding.JobID = job.ID
-	if err := c.saveAuthorityBinding(binding); err != nil {
-		_ = c.failQueuedJob(job.ID, "authority binding persistence failed")
-		return nil, fmt.Errorf("job disabled because authority binding failed: %w", err)
+	binding, err := c.SetHeldCost(held.ID, controlRef, costUnits)
+	if err != nil {
+		_, _ = c.CancelHeld(held.ID, controlRef, "trusted cost binding failed")
+		return nil, err
 	}
-	if err := c.events.Append(eventlog.Event{Type: "cluster.job.authority_bound", Data: map[string]any{"job_id": job.ID, "authority_id": authorityID, "required_capabilities": binding.RequiredCapabilities, "required_data_scopes": binding.RequiredDataScopes, "required_tool": binding.RequiredTool}}); err != nil {
-		path, _ := c.authorityBindingPath(job.ID)
-		_ = os.Remove(path)
-		_ = c.failQueuedJob(job.ID, "authority binding audit failed")
-		return nil, fmt.Errorf("job disabled because authority binding audit failed: %w", err)
+	if err := c.reserveAuthorityWork(binding); err != nil {
+		_, _ = c.CancelHeld(held.ID, controlRef, "authority concurrent-work budget denied")
+		return nil, err
 	}
-	return job, nil
+	activated, err := c.ActivateHeld(held.ID, controlRef)
+	if err != nil {
+		current, getErr := c.Job(held.ID)
+		if getErr == nil && current.Status == "held" {
+			if _, cancelErr := c.CancelHeld(held.ID, controlRef, "authorized submission activation failed"); cancelErr == nil {
+				if releaseErr := c.releaseAuthorityBindingWork(binding); releaseErr != nil {
+					c.noteBudgetCleanupPending(held.ID, releaseErr)
+				}
+			}
+		}
+		return nil, err
+	}
+	return activated, nil
 }
 
 func (c *Coordinator) failQueuedJob(jobID, reason string) error {
@@ -230,12 +230,15 @@ func (c *Coordinator) failQueuedJob(jobID, reason string) error {
 	return save(path, &job)
 }
 
-// LeaseJobAuthorized revalidates authority immediately before a worker sees a
-// lease. Jobs whose authority was revoked or expired are failed without being
-// disclosed to the worker, then the coordinator continues looking for work.
+// LeaseJobAuthorized revalidates authority, hierarchical concurrency and cost
+// immediately before a Worker receives the lease token. A denied lease is
+// failed closed inside the coordinator and is never disclosed to the Worker.
 func (c *Coordinator) LeaseJobAuthorized(worker *Worker, leaseSeconds int) (*Lease, error) {
 	if c.authorityChecker() == nil {
 		return c.LeaseJob(worker, leaseSeconds)
+	}
+	if err := c.reconcileTerminalAuthorityUsage(); err != nil {
+		return nil, fmt.Errorf("authority usage recovery failed: %w", err)
 	}
 	for attempts := 0; attempts < 256; attempts++ {
 		lease, err := c.LeaseJob(worker, leaseSeconds)
@@ -247,11 +250,23 @@ func (c *Coordinator) LeaseJobAuthorized(worker *Worker, leaseSeconds int) (*Lea
 			bindErr = c.authorizeBinding(binding)
 		}
 		if bindErr == nil {
+			bindErr = c.ensureAuthorityWorkReserved(binding)
+		}
+		if bindErr == nil {
+			bindErr = c.chargeAuthorityAttempt(&lease.Job, binding)
+		}
+		if bindErr == nil {
 			return lease, nil
 		}
-		_, completeErr := c.Complete(worker, lease.Job.ID, lease.LeaseToken, nil, "authority denied before lease delivery: "+bindErr.Error())
+		_, completeErr := c.Complete(worker, lease.Job.ID, lease.LeaseToken, nil, "authority or budget denied before lease delivery: "+bindErr.Error())
 		if completeErr != nil {
 			return nil, fmt.Errorf("unauthorized lease could not be failed closed: %w", completeErr)
+		}
+		if binding != nil {
+			if releaseErr := c.releaseAuthorityBindingWork(binding); releaseErr != nil {
+				c.noteBudgetCleanupPending(lease.Job.ID, releaseErr)
+				return nil, fmt.Errorf("blocked job left conservative budget reservation: %w", releaseErr)
+			}
 		}
 		if err := c.events.Append(eventlog.Event{Type: "cluster.job.authority_blocked", Data: map[string]any{"job_id": lease.Job.ID, "worker_id": worker.ID, "reason": bindErr.Error()}}); err != nil {
 			return nil, fmt.Errorf("authority block audit failed: %w", err)
@@ -261,7 +276,7 @@ func (c *Coordinator) LeaseJobAuthorized(worker *Worker, leaseSeconds int) (*Lea
 }
 
 // CompleteAuthorized revalidates authority before a remote result becomes a
-// terminal success. If authority changed while the worker was executing, the
+// terminal success. If authority changed while the Worker was executing, the
 // result is retained as evidence and moved to reconciliation instead.
 func (c *Coordinator) CompleteAuthorized(worker *Worker, jobID, leaseToken string, result json.RawMessage, jobErr string) (*Job, error) {
 	if c.authorityChecker() == nil {
@@ -272,7 +287,16 @@ func (c *Coordinator) CompleteAuthorized(worker *Worker, jobID, leaseToken strin
 		err = c.authorizeBinding(binding)
 	}
 	if err == nil {
-		return c.Complete(worker, jobID, leaseToken, result, jobErr)
+		job, completeErr := c.Complete(worker, jobID, leaseToken, result, jobErr)
+		if completeErr != nil {
+			return nil, completeErr
+		}
+		if releaseErr := c.releaseAuthorityBindingWork(binding); releaseErr != nil {
+			// Completion truth must not be hidden from the Worker just because
+			// conservative budget cleanup is pending. Recovery retries cleanup.
+			c.noteBudgetCleanupPending(jobID, releaseErr)
+		}
+		return job, nil
 	}
 	return c.moveAuthorityLossToReconciliation(worker, jobID, leaseToken, result, err)
 }
