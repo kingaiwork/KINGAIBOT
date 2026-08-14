@@ -252,6 +252,87 @@ func (g *Graph) Start(id string, now time.Time) error {
 		now = time.Now().UTC()
 	}
 	node.State = StateRunning
+	node.Error = ""
+	node.UpdatedAt = now
+	g.UpdatedAt = now
+	return nil
+}
+
+// AbortUnleasedStart is intentionally narrow: it may only be called after a
+// trusted dispatcher has proven that the remote job was still held and could
+// not have been leased. It returns the node to Ready without invoking replay
+// semantics because no external execution was possible.
+func (g *Graph) AbortUnleasedStart(id, reason string, now time.Time) error {
+	node, err := g.node(id)
+	if err != nil {
+		return err
+	}
+	if node.State != StateRunning {
+		return fmt.Errorf("work node %q is not running", id)
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	node.State = StateReady
+	node.Error = boundedReason(reason)
+	node.UpdatedAt = now
+	g.UpdatedAt = now
+	return nil
+}
+
+// RequireReconciliation reflects an already-created remote execution whose
+// outcome is uncertain. Unlike AmbiguousSideEffect, it does not apply local
+// replay policy because the remote Cluster coordinator now owns that job's
+// reconciliation/requeue decision.
+func (g *Graph) RequireReconciliation(id, reason string, now time.Time) error {
+	node, err := g.node(id)
+	if err != nil {
+		return err
+	}
+	if node.State != StateRunning {
+		return fmt.Errorf("work node %q is not running", id)
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	node.State = StateReconciling
+	node.Error = boundedReason(reason)
+	node.UpdatedAt = now
+	g.UpdatedAt = now
+	return nil
+}
+
+func (g *Graph) ResumeReconciliation(id string, now time.Time) error {
+	node, err := g.node(id)
+	if err != nil {
+		return err
+	}
+	if node.State != StateReconciling {
+		return fmt.Errorf("work node %q is not reconciling", id)
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	node.State = StateRunning
+	node.Error = ""
+	node.UpdatedAt = now
+	g.UpdatedAt = now
+	return nil
+}
+
+func (g *Graph) Fail(id, reason string, now time.Time) error {
+	node, err := g.node(id)
+	if err != nil {
+		return err
+	}
+	if node.State != StateRunning && node.State != StateReconciling {
+		return fmt.Errorf("work node %q is not running or reconciling", id)
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	node.State = StateFailed
+	node.Error = boundedReason(reason)
 	node.UpdatedAt = now
 	g.UpdatedAt = now
 	return nil
@@ -302,7 +383,7 @@ func (g *Graph) AmbiguousSideEffect(id string, reason string, now time.Time) err
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	node.Error = strings.TrimSpace(reason)
+	node.Error = boundedReason(reason)
 	switch node.Replay {
 	case ReplaySafe:
 		node.State = StatePending
@@ -358,7 +439,6 @@ func (g *Graph) validateAcyclic() error {
 			if err := visit(id); err != nil {
 				return err
 			}
-		}
 	}
 	return nil
 }
@@ -379,6 +459,14 @@ func canonical(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func boundedReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if len(reason) > 8192 {
+		reason = reason[:8192]
+	}
+	return reason
 }
 
 func validType(v NodeType) bool {
