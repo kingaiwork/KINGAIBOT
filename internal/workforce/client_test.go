@@ -22,7 +22,7 @@ func TestClientHeartbeatAndSync(t *testing.T) {
 			_, _ = w.Write([]byte(`{"ok":true}`))
 		case "/api/workforce/runtime/sync":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"ok":true,"schema":"kingai.workforce.v1","employees":[],"workflows":[],"policy":{"cloud_never_bypasses_local_approval":true,"arbitrary_shell":false,"execution_boundary":"KINGAIBOT customer-local"}}`))
+			_, _ = w.Write([]byte(`{"ok":true,"schema":"kingai.workforce.v1","skills_schema":"kingai.workforce.skills.v1","employees":[],"workflows":[],"connectors":[],"connector_bindings":[],"policy":{"cloud_never_bypasses_local_approval":true,"arbitrary_shell":false,"credentials_in_cloud":false,"connector_config_grants_permission":false,"execution_boundary":"KINGAIBOT customer-local"}}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -42,17 +42,26 @@ func TestClientHeartbeatAndSync(t *testing.T) {
 }
 
 func TestClientRejectsUnsafeSyncPolicy(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true,"policy":{"cloud_never_bypasses_local_approval":false,"arbitrary_shell":true}}`))
-	}))
-	defer server.Close()
-	client, err := NewClient(Settings{Enabled: true, ControlPlaneURL: server.URL, NodeToken: testToken(), AllowInsecureHTTP: true, RequestTimeout: 2 * time.Second}, "test")
-	if err != nil {
-		t.Fatal(err)
+	cases := []string{
+		`{"ok":true,"policy":{"cloud_never_bypasses_local_approval":false,"arbitrary_shell":true}}`,
+		`{"ok":true,"policy":{"cloud_never_bypasses_local_approval":true,"arbitrary_shell":false,"credentials_in_cloud":true}}`,
+		`{"ok":true,"policy":{"cloud_never_bypasses_local_approval":true,"arbitrary_shell":false,"connector_config_grants_permission":true}}`,
 	}
-	if _, err := client.Sync(context.Background()); err == nil {
-		t.Fatal("expected unsafe cloud policy to be rejected")
+	for _, body := range cases {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(body))
+		}))
+		client, err := NewClient(Settings{Enabled: true, ControlPlaneURL: server.URL, NodeToken: testToken(), AllowInsecureHTTP: true, RequestTimeout: 2 * time.Second}, "test")
+		if err != nil {
+			server.Close()
+			t.Fatal(err)
+		}
+		if _, err := client.Sync(context.Background()); err == nil {
+			server.Close()
+			t.Fatal("expected unsafe cloud policy to be rejected")
+		}
+		server.Close()
 	}
 }
 
