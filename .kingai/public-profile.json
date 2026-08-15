@@ -1,0 +1,10 @@
+{
+  "schema": "kingai.public-profile.v1",
+  "product_id": "kingaibot",
+  "role": "temporary-public-source-and-product-showcase",
+  "migration_state": "private-source-repository-required",
+  "current_source_visibility": "public",
+  "target_public_role": "commercial-product-open-resources-and-distribution",
+  "audiences": ["customers", "developers", "partners", "investors"],
+  "governance_source": "kingaiwork/KINGAIASE"
+}
