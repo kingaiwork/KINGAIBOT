@@ -33,16 +33,27 @@ type Settings struct {
 	MaxReportBytes    int
 }
 
+type EmployeeConnector struct {
+	ID          string         `json:"id"`
+	ProviderKey string         `json:"provider_key"`
+	Name        string         `json:"name"`
+	AuthMode    string         `json:"auth_mode"`
+	LocalAlias  string         `json:"local_alias"`
+	Skills      []string       `json:"skills"`
+	Config      map[string]any `json:"config"`
+}
+
 type Employee struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Title         string   `json:"title"`
-	RoleKey       string   `json:"role_key"`
-	Status        string   `json:"status"`
-	AutonomyLevel string   `json:"autonomy_level"`
-	RiskCeiling   string   `json:"risk_ceiling"`
-	Skills        []string `json:"skills"`
-	Goals         []string `json:"goals"`
+	ID            string              `json:"id"`
+	Name          string              `json:"name"`
+	Title         string              `json:"title"`
+	RoleKey       string              `json:"role_key"`
+	Status        string              `json:"status"`
+	AutonomyLevel string              `json:"autonomy_level"`
+	RiskCeiling   string              `json:"risk_ceiling"`
+	Skills        []string            `json:"skills"`
+	Goals         []string            `json:"goals"`
+	Connectors    []EmployeeConnector `json:"connectors,omitempty"`
 }
 
 type Workflow struct {
@@ -55,14 +66,38 @@ type Workflow struct {
 	Definition  map[string]any `json:"definition"`
 }
 
+type Connector struct {
+	ID            string         `json:"id"`
+	ProviderKey   string         `json:"provider_key"`
+	Name          string         `json:"name"`
+	Status        string         `json:"status"`
+	AuthMode      string         `json:"auth_mode"`
+	LocalAlias    string         `json:"local_alias"`
+	AllowedSkills []string       `json:"allowed_skills"`
+	Config        map[string]any `json:"config"`
+}
+
+type ConnectorBinding struct {
+	OrganizationID string   `json:"organization_id"`
+	EmployeeID     string   `json:"employee_id"`
+	ConnectorID    string   `json:"connector_id"`
+	Status         string   `json:"status"`
+	SkillScope     []string `json:"skill_scope"`
+}
+
 type SyncResponse struct {
-	OK        bool       `json:"ok"`
-	Schema    string     `json:"schema"`
-	Employees []Employee `json:"employees"`
-	Workflows []Workflow `json:"workflows"`
-	Policy    struct {
+	OK                bool               `json:"ok"`
+	Schema            string             `json:"schema"`
+	SkillsSchema      string             `json:"skills_schema"`
+	Employees         []Employee         `json:"employees"`
+	Workflows         []Workflow         `json:"workflows"`
+	Connectors        []Connector        `json:"connectors"`
+	ConnectorBindings []ConnectorBinding `json:"connector_bindings"`
+	Policy            struct {
 		CloudNeverBypassesLocalApproval bool   `json:"cloud_never_bypasses_local_approval"`
 		ArbitraryShell                  bool   `json:"arbitrary_shell"`
+		CredentialsInCloud              bool   `json:"credentials_in_cloud"`
+		ConnectorConfigGrantsPermission bool   `json:"connector_config_grants_permission"`
 		ExecutionBoundary               string `json:"execution_boundary"`
 	} `json:"policy"`
 }
@@ -160,7 +195,7 @@ func (c *Client) Sync(ctx context.Context) (*SyncResponse, error) {
 	if !out.OK {
 		return nil, errors.New("workforce sync was not acknowledged")
 	}
-	if out.Policy.ArbitraryShell || !out.Policy.CloudNeverBypassesLocalApproval {
+	if out.Policy.ArbitraryShell || !out.Policy.CloudNeverBypassesLocalApproval || out.Policy.CredentialsInCloud || out.Policy.ConnectorConfigGrantsPermission {
 		return nil, errors.New("unsafe workforce cloud policy rejected")
 	}
 	return &out, nil
