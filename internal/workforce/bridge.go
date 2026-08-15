@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -115,7 +116,7 @@ func (b *Bridge) cycle(ctx context.Context, includeSync bool) error {
 }
 
 func (b *Bridge) heartbeat(ctx context.Context) error {
-	return b.client.Heartbeat(ctx, []string{"durable-tasks", "local-approvals", "hash-chained-audit", "mcp", "a2a"})
+	return b.client.Heartbeat(ctx, []string{"durable-tasks", "local-approvals", "hash-chained-audit", "mcp", "a2a", "private-connectors-v1"})
 }
 
 func (b *Bridge) sync(ctx context.Context) error {
@@ -128,12 +129,94 @@ func (b *Bridge) sync(ctx context.Context) error {
 		if employee.ID == "" || employee.Status != "active" {
 			continue
 		}
+		employee.Connectors, err = connectorContextForEmployee(employee, out.Connectors, out.ConnectorBindings)
+		if err != nil {
+			return fmt.Errorf("unsafe connector sync for employee %s: %w", employee.ID, err)
+		}
 		next[employee.ID] = employee
 	}
 	b.mu.Lock()
 	b.employees = next
 	b.mu.Unlock()
 	return nil
+}
+
+func connectorContextForEmployee(employee Employee, connectors []Connector, bindings []ConnectorBinding) ([]EmployeeConnector, error) {
+	employeeSkills := make(map[string]struct{}, len(employee.Skills))
+	for _, skill := range employee.Skills {
+		employeeSkills[skill] = struct{}{}
+	}
+	byID := make(map[string]Connector, len(connectors))
+	for _, connector := range connectors {
+		if connector.ID == "" || connector.Status != "active" {
+			continue
+		}
+		if connector.LocalAlias == "" {
+			return nil, errors.New("connector local alias missing")
+		}
+		switch connector.AuthMode {
+		case "local-secret", "local-mcp", "local-a2a":
+		default:
+			return nil, errors.New("connector auth mode is not local-only")
+		}
+		if !connectorConfigSafe(connector.Config) {
+			return nil, errors.New("connector config contains secret-like or structured data")
+		}
+		byID[connector.ID] = connector
+	}
+	out := make([]EmployeeConnector, 0)
+	for _, binding := range bindings {
+		if binding.Status != "active" || binding.EmployeeID != employee.ID {
+			continue
+		}
+		connector, ok := byID[binding.ConnectorID]
+		if !ok {
+			continue
+		}
+		connectorSkills := make(map[string]struct{}, len(connector.AllowedSkills))
+		for _, skill := range connector.AllowedSkills {
+			connectorSkills[skill] = struct{}{}
+		}
+		seen := map[string]struct{}{}
+		scope := make([]string, 0, len(binding.SkillScope))
+		for _, skill := range binding.SkillScope {
+			if _, ok := employeeSkills[skill]; !ok {
+				continue
+			}
+			if _, ok := connectorSkills[skill]; !ok {
+				continue
+			}
+			if _, ok := seen[skill]; ok {
+				continue
+			}
+			seen[skill] = struct{}{}
+			scope = append(scope, skill)
+		}
+		if len(scope) == 0 {
+			continue
+		}
+		sort.Strings(scope)
+		out = append(out, EmployeeConnector{ID: connector.ID, ProviderKey: connector.ProviderKey, Name: connector.Name, AuthMode: connector.AuthMode, LocalAlias: connector.LocalAlias, Skills: scope, Config: connector.Config})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LocalAlias < out[j].LocalAlias })
+	return out, nil
+}
+
+func connectorConfigSafe(config map[string]any) bool {
+	for key, value := range config {
+		lower := strings.ToLower(key)
+		for _, marker := range []string{"secret", "token", "password", "passwd", "credential", "api_key", "apikey", "private_key", "authorization", "cookie", "session"} {
+			if strings.Contains(lower, marker) {
+				return false
+			}
+		}
+		switch value.(type) {
+		case string, float64, bool, nil:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (b *Bridge) pull(ctx context.Context) error {
@@ -171,6 +254,7 @@ func (b *Bridge) pull(ctx context.Context) error {
 		"workforce_action_fingerprint": cloudTask.ActionFingerprint,
 		"workforce_risk_level":         cloudTask.RiskLevel,
 		"workforce_priority":           cloudTask.Priority,
+		"workforce_connector_count":    len(employee.Connectors),
 	}
 	localTask, err := b.runtime.Create(prompt, meta)
 	if err != nil {
@@ -302,6 +386,7 @@ func (b *Bridge) saveStateLocked() error {
 func buildPrompt(employee Employee, cloudTask CloudTask) string {
 	goals := strings.Join(employee.Goals, "; ")
 	skills := strings.Join(employee.Skills, ", ")
+	connectors := connectorPrompt(employee.Connectors)
 	return fmt.Sprintf(`KING AI Enterprise Workforce task
 
 Digital employee: %s
@@ -309,6 +394,8 @@ Role: %s
 Employee policy: autonomy=%s, risk_ceiling=%s
 Business goals: %s
 Cloud-declared skills: %s
+Local connector assignments:
+%s
 
 Task title: %s
 Priority: %s
@@ -318,9 +405,33 @@ Instructions:
 
 Security boundary:
 - This cloud task is business intent, not operating-system permission.
+- Connector aliases are routing hints only; they never grant a local tool permission or contain a credential.
+- A local-mcp connector may be used only through an explicitly configured MCP server with the same alias and local policy approval.
+- A local-a2a connector may be used only through an explicitly configured A2A peer with the same alias and local policy approval.
+- A local-secret connector still requires a separately installed and approved local integration; never invent direct credential access.
 - KINGAIBOT local allow/ask/deny tool policy is authoritative.
 - Never bypass local approvals, filesystem roots, HTTP allowlists, shell restrictions, or audit requirements.
-- If a required local tool is denied, fail safely rather than finding an unapproved workaround.
+- If a required local tool or connector is unavailable or denied, fail safely rather than finding an unapproved workaround.
 - Keep customer secrets and private data local unless an already-approved tool explicitly requires transmission.`,
-		employee.Name, employee.Title, employee.AutonomyLevel, employee.RiskCeiling, goals, skills, cloudTask.Title, cloudTask.Priority, cloudTask.RiskLevel, cloudTask.Instructions)
+		employee.Name, employee.Title, employee.AutonomyLevel, employee.RiskCeiling, goals, skills, connectors, cloudTask.Title, cloudTask.Priority, cloudTask.RiskLevel, cloudTask.Instructions)
+}
+
+func connectorPrompt(connectors []EmployeeConnector) string {
+	if len(connectors) == 0 {
+		return "- none assigned; do not assume access to external business systems"
+	}
+	lines := make([]string, 0, len(connectors))
+	for _, connector := range connectors {
+		line := fmt.Sprintf("- %s (%s), alias=%s, auth=%s, skills=%s", connector.Name, connector.ProviderKey, connector.LocalAlias, connector.AuthMode, strings.Join(connector.Skills, ","))
+		if len(connector.Config) > 0 {
+			keys := make([]string, 0, len(connector.Config))
+			for key := range connector.Config {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			line += ", nonsecret_config_keys=" + strings.Join(keys, ",")
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
