@@ -29,6 +29,7 @@ import (
 	karuntime "github.com/kingaiwork/KINGAIBOT/internal/runtime"
 	"github.com/kingaiwork/KINGAIBOT/internal/task"
 	"github.com/kingaiwork/KINGAIBOT/internal/tool"
+	"github.com/kingaiwork/KINGAIBOT/internal/workforce"
 	"github.com/kingaiwork/KINGAIBOT/internal/workgraph"
 )
 
@@ -65,8 +66,9 @@ func main() {
 	rt := karuntime.New(ts, as, el, ms, ae, es, cfg)
 	defer rt.Close()
 
-	// Authority exists before platform task creation so trusted agent identity
-	// can be resolved into durable task metadata. Models never provide this ID.
+	// Authority exists before platform/workforce task creation so trusted local
+	// agent identity can be resolved into durable task metadata. Cloud employee
+	// identities never become authority subjects by themselves.
 	authorityStore, mustErr := authority.NewStore(filepath.Join(cfg.Runtime.DataDir, "authority"), el)
 	must(mustErr)
 	boundPlatformRuntime, mustErr := authority.NewBoundTaskRuntime(rt, authorityStore)
@@ -107,6 +109,23 @@ func main() {
 	defer orchestrator.Close()
 
 	must(rt.Recover())
+
+	// Enterprise Workforce is opt-in and inert unless a one-time-issued KING AI
+	// service token is installed locally. It enters the same BoundTaskRuntime as
+	// Platform, so cloud metadata cannot supply authority_id or bypass v14 local
+	// Capability Envelopes, policy, approval, audit or reconciliation.
+	workforceSettings, mustErr := workforce.SettingsFromEnv(cfg.Runtime.DataDir)
+	must(mustErr)
+	var workforceCancel context.CancelFunc = func() {}
+	if workforceSettings.Enabled {
+		workforceBridge, er := workforce.NewBridge(workforceSettings, version, cfg.Runtime.DataDir, boundPlatformRuntime)
+		must(er)
+		var workforceCtx context.Context
+		workforceCtx, workforceCancel = context.WithCancel(context.Background())
+		go workforceBridge.Run(workforceCtx)
+		slog.Info("KING AI Enterprise Workforce enabled", "authority", "v14-bound", "credentials", "customer-local")
+	}
+	defer workforceCancel()
 
 	coreServer := api.New(cfg, rt, tr)
 	coreHandler := coreServer.Handler()
@@ -191,7 +210,7 @@ func main() {
 
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "v1.4-safe", "knowledge", "safe", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "v1.4-safe", "knowledge", "safe", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled", "workforce", workforceSettings.Enabled)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
@@ -201,6 +220,7 @@ func main() {
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	<-ch
 	slog.Info("shutting down")
+	workforceCancel()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
