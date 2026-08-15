@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "employees": {
+    "REPLACE_WITH_CLOUD_EMPLOYEE_ID": {
+      "agent_id": "REPLACE_WITH_LOCAL_AGENT_ID"
+    }
+  }
+}
