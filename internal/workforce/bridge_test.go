@@ -42,7 +42,7 @@ func TestBridgeRoutesCloudTaskThroughLocalRuntime(t *testing.T) {
 		case "/api/workforce/runtime/heartbeat":
 			_, _ = w.Write([]byte(`{"ok":true}`))
 		case "/api/workforce/runtime/sync":
-			_, _ = w.Write([]byte(`{"ok":true,"schema":"kingai.workforce.v1","employees":[{"id":"emp_1","name":"Emma","title":"AI Sales Manager","status":"active","autonomy_level":"execute","risk_ceiling":"medium","skills":["crm.read"],"goals":["Follow up leads"]}],"workflows":[],"policy":{"cloud_never_bypasses_local_approval":true,"arbitrary_shell":false,"execution_boundary":"KINGAIBOT customer-local"}}`))
+			_, _ = w.Write([]byte(`{"ok":true,"schema":"kingai.workforce.v1","skills_schema":"kingai.workforce.skills.v1","employees":[{"id":"emp_1","name":"Emma","title":"AI Sales Manager","status":"active","autonomy_level":"execute","risk_ceiling":"medium","skills":["crm.read","crm.update"],"goals":["Follow up leads"]}],"workflows":[],"connectors":[{"id":"con_1","provider_key":"crm","name":"Company CRM","status":"active","auth_mode":"local-mcp","local_alias":"crm-main","allowed_skills":["crm.read","crm.update"],"config":{"workspace":"west"}}],"connector_bindings":[{"organization_id":"org_1","employee_id":"emp_1","connector_id":"con_1","status":"active","skill_scope":["crm.read"]}],"policy":{"cloud_never_bypasses_local_approval":true,"arbitrary_shell":false,"credentials_in_cloud":false,"connector_config_grants_permission":false,"execution_boundary":"KINGAIBOT customer-local"}}`))
 		case "/api/workforce/runtime/tasks/pull":
 			mu.Lock()
 			pullCount++
@@ -82,8 +82,17 @@ func TestBridgeRoutesCloudTaskThroughLocalRuntime(t *testing.T) {
 	if !strings.Contains(rt.tasks[0].Input, "local allow/ask/deny tool policy is authoritative") {
 		t.Fatal("local security boundary missing from task prompt")
 	}
+	if !strings.Contains(rt.tasks[0].Input, "alias=crm-main") || !strings.Contains(rt.tasks[0].Input, "skills=crm.read") {
+		t.Fatal("least-privilege connector context missing from task prompt")
+	}
+	if strings.Contains(rt.tasks[0].Input, "crm.update") {
+		t.Fatal("unbound connector skill leaked into employee task context")
+	}
 	if rt.tasks[0].Metadata["workforce_cloud_task_id"] != "cloud_1" {
 		t.Fatal("cloud task id not persisted in local task metadata")
+	}
+	if rt.tasks[0].Metadata["workforce_connector_count"] != 1 {
+		t.Fatal("connector count not persisted in local task metadata")
 	}
 	if err := bridge.reconcile(ctx); err != nil {
 		t.Fatal(err)
@@ -93,5 +102,13 @@ func TestBridgeRoutesCloudTaskThroughLocalRuntime(t *testing.T) {
 	}
 	if _, ok := resultBody["output"]; ok {
 		t.Fatal("private local output must not be uploaded by default")
+	}
+}
+
+func TestConnectorContextRejectsSecretLikeCloudConfig(t *testing.T) {
+	employee := Employee{ID: "emp", Skills: []string{"crm.read"}}
+	_, err := connectorContextForEmployee(employee, []Connector{{ID: "con", Status: "active", AuthMode: "local-mcp", LocalAlias: "crm", AllowedSkills: []string{"crm.read"}, Config: map[string]any{"api_token": "must-not-arrive"}}}, []ConnectorBinding{{EmployeeID: "emp", ConnectorID: "con", Status: "active", SkillScope: []string{"crm.read"}}})
+	if err == nil {
+		t.Fatal("secret-like cloud connector config must be rejected locally")
 	}
 }
