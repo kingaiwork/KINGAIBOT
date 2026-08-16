@@ -1,7 +1,6 @@
 package platform
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -245,7 +244,7 @@ func (g *channelGatewayV170) processDelivery(id string) {
 	}
 	m.mu.Unlock()
 
-	_, sendErr := g.send(context.Background(), &channel, &route, t.Output, d.Secrets)
+	_, sendErr := g.send(m.ctx, &channel, &route, t.Output, d.Secrets)
 	if sendErr == nil {
 		g.complete(&d, "delivered", "")
 		return
@@ -334,7 +333,9 @@ type channelHTTPError struct {
 	Body   string
 }
 
-func (e *channelHTTPError) Error() string { return fmt.Sprintf("remote channel HTTP %d: %s", e.Status, e.Body) }
+func (e *channelHTTPError) Error() string {
+	return fmt.Sprintf("remote channel HTTP %d: %s", e.Status, e.Body)
+}
 
 type ambiguousChannelError struct{ err error }
 
