@@ -75,6 +75,7 @@ func main() {
 	tr := tool.New(cfg, pe, as, el)
 	pc := provider.New(cfg.Providers, time.Duration(cfg.Runtime.RequestTimeoutSeconds)*time.Second)
 	ae := agent.New(cfg, pc, tr, ms)
+	ae.SetSelfContextProvider(ce.Context)
 	rt := karuntime.New(ts, as, el, ms, ae, es, cfg)
 	defer rt.Close()
 
