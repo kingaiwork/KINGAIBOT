@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/kingaiwork/KINGAIBOT/internal/memory"
 )
 
 type inboundEnvelopeV161 struct {
@@ -184,9 +186,7 @@ func memorySafeError(err error) string {
 	if err == nil {
 		return ""
 	}
-	// Keep durable receipt diagnostics bounded and avoid copying credentials or
-	// arbitrary provider bodies into the channel bookkeeping layer.
-	s := strings.TrimSpace(err.Error())
+	s := strings.TrimSpace(memory.SanitizeContent(err.Error()))
 	if len(s) > 512 {
 		s = s[:512]
 	}
