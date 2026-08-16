@@ -3,7 +3,6 @@ package platform
 import (
 	"crypto/hmac"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strconv"
