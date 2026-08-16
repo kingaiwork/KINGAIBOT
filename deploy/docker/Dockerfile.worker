@@ -1,8 +1,9 @@
 FROM golang:1.26.6-trixie AS build
 WORKDIR /src
 COPY . .
-RUN CGO_ENABLED=0 go test ./cmd/kingworker ./internal/cluster ./internal/storage ./internal/netguard && \
-    CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w -X main.version=1.4.0' -o /out/kingworker ./cmd/kingworker && \
+RUN VERSION="$(tr -d '\r\n' < VERSION)" && test -n "$VERSION" && \
+    CGO_ENABLED=0 go test ./cmd/kingworker ./internal/cluster ./internal/storage ./internal/netguard && \
+    CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=$VERSION" -o /out/kingworker ./cmd/kingworker && \
     mkdir -p /out/data && chmod 0700 /out/data
 
 FROM gcr.io/distroless/static-debian13:nonroot
