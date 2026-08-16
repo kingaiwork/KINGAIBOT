@@ -87,14 +87,18 @@ func (m *Manager) gatewayV170() *channelGatewayV170 {
 func (g *channelGatewayV170) loop() {
 	defer g.manager.wg.Done()
 	defer channelGatewaysV170.Delete(g.manager)
-	ticker := time.NewTicker(channelDeliveryPollInterval)
-	defer ticker.Stop()
+	deliveryTicker := time.NewTicker(channelDeliveryPollInterval)
+	pruneTicker := time.NewTicker(time.Hour)
+	defer deliveryTicker.Stop()
+	defer pruneTicker.Stop()
+	g.pruneReceipts()
 	for {
 		select {
 		case <-g.manager.ctx.Done():
 			return
-		case <-ticker.C:
+		case <-deliveryTicker.C:
 			g.processPending()
+		case <-pruneTicker.C:
 			g.pruneReceipts()
 		}
 	}
@@ -140,14 +144,14 @@ func (g *channelGatewayV170) route(channel *Channel, rawSender, target, thread s
 	}
 	t := now()
 	session := Session{ID: sessionID, Channel: channel.ID, Sender: pseudonymousSender(rawSender, id), Turns: []SessionTurn{}, CreatedAt: t, UpdatedAt: t}
+	route := &ChannelRoute{ID: id, ChannelID: channel.ID, SessionID: sessionID, SenderDigest: senderDigest(rawSender), ReplyTarget: target, Thread: thread, CreatedAt: t, UpdatedAt: t}
+	if err := m.audit("channel.route.created", map[string]any{"channel_id": channel.ID, "route_id": id, "session_id": sessionID, "sender_sha256_96": route.SenderDigest}); err != nil {
+		return nil, err
+	}
 	if err := m.save("sessions", sessionID, &session); err != nil {
 		return nil, err
 	}
-	route := &ChannelRoute{ID: id, ChannelID: channel.ID, SessionID: sessionID, SenderDigest: senderDigest(rawSender), ReplyTarget: target, Thread: thread, CreatedAt: t, UpdatedAt: t}
 	if err := m.save("channel-routes", id, route); err != nil {
-		return nil, err
-	}
-	if err := m.audit("channel.route.created", map[string]any{"channel_id": channel.ID, "route_id": id, "session_id": sessionID, "sender_sha256_96": route.SenderDigest}); err != nil {
 		return nil, err
 	}
 	return route, nil
@@ -166,10 +170,10 @@ func (g *channelGatewayV170) ensurePending(channel *Channel, route *ChannelRoute
 	}
 	t := now()
 	d := &OutboundDelivery{ID: id, ChannelID: channel.ID, SessionID: route.SessionID, TaskID: taskID, RouteID: route.ID, Status: "waiting_task", NextAttemptAt: t, Secrets: secrets, CreatedAt: t, UpdatedAt: t}
-	if err := m.save("outbound-pending", id, d); err != nil {
+	if err := m.audit("channel.outbound.queued", map[string]any{"channel_id": channel.ID, "delivery_id": id, "task_id": taskID, "route_id": route.ID}); err != nil {
 		return nil, err
 	}
-	if err := m.audit("channel.outbound.queued", map[string]any{"channel_id": channel.ID, "delivery_id": id, "task_id": taskID, "route_id": route.ID}); err != nil {
+	if err := m.save("outbound-pending", id, d); err != nil {
 		return nil, err
 	}
 	return d, nil
