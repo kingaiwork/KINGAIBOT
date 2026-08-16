@@ -17,6 +17,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/approval"
 	"github.com/kingaiwork/KINGAIBOT/internal/authority"
 	"github.com/kingaiwork/KINGAIBOT/internal/cluster"
+	"github.com/kingaiwork/KINGAIBOT/internal/cognition"
 	"github.com/kingaiwork/KINGAIBOT/internal/config"
 	"github.com/kingaiwork/KINGAIBOT/internal/eventlog"
 	"github.com/kingaiwork/KINGAIBOT/internal/evolution"
@@ -32,7 +33,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/workgraph"
 )
 
-var version = "1.4.0"
+var version = "1.6.0"
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "configuration file")
@@ -58,6 +59,18 @@ func main() {
 	must(mustErr)
 	es, mustErr := evolution.New(filepath.Join(cfg.Runtime.DataDir, "evolution"))
 	must(mustErr)
+	ec, mustErr := evolution.NewController(es, el)
+	must(mustErr)
+	ce, mustErr := cognition.New(filepath.Join(cfg.Runtime.DataDir, "cognition"), ms, ec, el, cognition.Config{
+		Enabled:                      cfg.Memory.Enabled,
+		ReflectionInterval:           30 * time.Minute,
+		MaxPrinciples:                32,
+		AutoProposalFailureThreshold: 3,
+		StoreTaskInputs:              cfg.Memory.StoreTaskInputs,
+	})
+	must(mustErr)
+	defer ce.Close()
+	must(ce.AttachTasks(ts))
 	pe := policy.New(cfg.Security.DefaultToolPolicy, cfg.Security.ToolPolicies)
 	tr := tool.New(cfg, pe, as, el)
 	pc := provider.New(cfg.Providers, time.Duration(cfg.Runtime.RequestTimeoutSeconds)*time.Second)
@@ -96,8 +109,6 @@ func main() {
 	must(cc.SetTaskAuthorityResolver(taskAuthorityResolver))
 	tr.RegisterExtension(cc)
 
-	ec, mustErr := evolution.NewController(es, el)
-	must(mustErr)
 	tr.RegisterExtension(ec)
 
 	wgs, mustErr := workgraph.NewStore(filepath.Join(cfg.Runtime.DataDir, "workgraphs"), el)
@@ -156,6 +167,12 @@ func main() {
 	root.Handle("/v1/cluster/jobs/", clusterAdmin)
 	root.Handle("/v1/cluster/worker/", cc.WorkerHandler())
 
+	// Cognitive runtime provides durable operational continuity, learned
+	// experience, reflection and an inspectable self-model. It is deliberately
+	// admin-only and is not a claim of subjective consciousness.
+	cognitionAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, ce.Handler())
+	root.Handle("/v1/cognition/", cognitionAdmin)
+
 	// Evolution control can create proposals, record evaluations and progress a
 	// reviewed artifact through stage/release/rollback. It never edits source or
 	// deploys itself; all trust transitions require admin authority and audit.
@@ -191,7 +208,7 @@ func main() {
 
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "v1.4-safe", "knowledge", "safe", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "v1.4-safe", "knowledge", "safe", "cognition", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
