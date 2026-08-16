@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${VERSION:-${GITHUB_REF_NAME:-1.6.0}}"
+VERSION="${VERSION:-${GITHUB_REF_NAME:-1.7.0}}"
 VERSION="${VERSION#v}"
 MIN_GO_VERSION="${KINGAGENT_MIN_RELEASE_GO:-1.26.6}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -74,6 +74,7 @@ build_target() {
   [[ "$goos" == "darwin" && -f "$ROOT/scripts/install-macos-system.sh" ]] && cp "$ROOT/scripts/install-macos-system.sh" "$stage/install-macos-system.sh"
   [[ -f "$ROOT/docs/PLATFORM.md" ]] && cp "$ROOT/docs/PLATFORM.md" "$stage/PLATFORM.md"
   [[ -f "$ROOT/docs/COGNITIVE-RUNTIME.md" ]] && cp "$ROOT/docs/COGNITIVE-RUNTIME.md" "$stage/COGNITIVE-RUNTIME.md"
+  [[ -f "$ROOT/docs/CHANNEL-GATEWAY.md" ]] && cp "$ROOT/docs/CHANNEL-GATEWAY.md" "$stage/CHANNEL-GATEWAY.md"
   chmod 0755 "$stage/update.sh"
   [[ -f "$stage/install-macos-system.sh" ]] && chmod 0755 "$stage/install-macos-system.sh"
   normalize_mtime "$stage"
@@ -120,6 +121,8 @@ cat > "$DIST/RELEASE-MANIFEST.json" <<EOF
   "visual_client": "kingdesktop",
   "control_center": "http://127.0.0.1:18889/ui/",
   "cognitive_runtime": true,
+  "unified_channel_gateway": true,
+  "native_channels": ["telegram", "slack", "discord", "whatsapp"],
   "provider_catalog": "providers.catalog.json",
   "macos_system_installer": "install-macos-system.sh",
   "targets": ["linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64", "windows/arm64"]
