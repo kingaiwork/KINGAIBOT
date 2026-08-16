@@ -1,155 +1,266 @@
-# KINGAIBOT v1.7.0
+# KINGAIBOT v1.8.0
 
-**Secure, durable, model-agnostic agent runtime and unified communications gateway for the KING AI system.**
+**Secure, durable, model-agnostic system Agent Runtime with governed cloud fleet, memory continuity and native communications.**
 
 Official website: **https://kingai.work**  
 Owner: **USDX TECH LLC / KING AI**  
 Contact: **vip@kingai.work**
 
-KINGAIBOT is an independent KING implementation. It is not a model wrapper and it does not delegate authority to the model. Models are replaceable reasoning resources; identity, authority, budgets, tasks, memory, evidence, approvals, communications, reconciliation and release governance remain owned by KINGAIBOT.
+KINGAIBOT is the controlled execution layer of the KING AI system. It is not a model wrapper and it never treats a model response as system authority. Models are replaceable reasoning resources; durable identity, authority, budgets, tasks, memory, approvals, evidence, communications, reconciliation and release governance remain owned by KINGAIBOT.
 
 > Learn the problem. Learn the standard. Design the KING solution. Never clone the implementation.
 
 ---
 
-## What KINGAIBOT is
+## System architecture
 
 ```text
-Users / Apps / Web / Native Channels
-              |
-      Unified Channel Gateway
-              |
-Identity / Session / Memory / Cognition
-              |
-Authority Envelope / Budget / Policy
-              |
-Approval / Audit / WorkGraph / Mission
-              |
-         Agent Runtime
-              |
- Tools / MCP / A2A / Workers / Nodes
-              |
-       Provider Router
-              |
-Cloud Models / Local Models / Private Models
-              |
- Evidence -> Completion or Reconciliation
-              |
- Governed Learning / Evolution Proposal
+Users / Apps / Telegram / Slack / Discord / WhatsApp / Webhook
+                              |
+                    Unified Channel Gateway
+                              |
+                 Identity / Session / Route
+                              |
+                     Memory / Cognition
+                              |
+KING AI Cloud ----> restriction-only policy
+     |                        |
+Fleet health                  v
+E2EE ciphertext      Local Authority Envelope
+     |                        |
+     +--------------> Budget / Policy / Approval
+                              |
+                            Audit
+                              |
+                       Agent Runtime
+                              |
+            Tools / MCP / A2A / Worker / Node
+                              |
+                       Provider Router
+                              |
+        Cloud Models / Local Models / Private Models
+                              |
+                Evidence -> Complete / Reconcile
+                              |
+                 Memory / Reflection / Learning
+                              |
+                    Evolution Proposal
 ```
 
-The system is designed around one rule: **unknown real-world side effects are reconciled, not blindly replayed.**
+Two invariants define the system:
 
-## v1.7.0 highlights
+1. **Model != authority.**
+2. **Unknown real-world side effects are reconciled, not blindly replayed.**
 
-### Unified native Channel Gateway
+v1.8 adds a third:
 
-v1.7 adds native two-way communications for:
+3. **Cloud policy can contract local authority, never expand it.**
+
+---
+
+## v1.8.0 — Cloud Identity & Fleet
+
+### Ed25519 device identity
+
+Each cloud-managed KINGAIBOT node owns its own Ed25519 private key. The private key is generated locally and remains in the protected Runtime data directory. The cloud receives only public SPKI material.
+
+Enrollment reuses the existing KINGAIASE OPS identity plane:
+
+```text
+one-time enrollment token
+        -> local Ed25519 key
+        -> signed KINGAI-OPS-ENROLL-V2 request
+        -> organization / workspace / node identity
+        -> token consumed
+        -> future requests signed by device key
+```
+
+The raw one-time token is never written into KINGAIBOT durable state. The supplied cloud configurators remove it from the service environment after successful enrollment.
+
+### Restriction-only policy
+
+Cloud policy may:
+
+- disable an already-configured Provider;
+- disable an already-configured Channel;
+- lower Runtime step/worker/timeout ceilings;
+- tighten `allow -> ask -> deny` tool policy;
+- disable encrypted continuity sync.
+
+Cloud policy cannot:
+
+- turn `deny` into `ask` or `allow`;
+- create a Capability Envelope;
+- create/enable a Provider or Channel;
+- approve high-risk work;
+- bypass local audit or reconciliation;
+- obtain local model/provider credentials.
+
+Channel contraction is safe to apply live and is audit-first. Provider, Runtime-ceiling and Tool-Policy changes affect components constructed at process start, so v1.8 marks them explicitly as `policy_restart_required` instead of falsely claiming they were hot-applied.
+
+### Local-first availability
+
+By default, KINGAIBOT remains operational under the last locally constructed security boundary if KING AI Cloud is unavailable.
+
+Set:
+
+```text
+KINGAI_CLOUD_REQUIRE_POLICY=1
+```
+
+only for deployments that intentionally require cloud-policy availability during startup.
+
+### AES-256-GCM encrypted continuity
+
+Memory continuity is opt-in:
+
+```text
+KINGAI_MEMORY_SYNC=1
+KINGAI_SYNC_KEY=<base64 of exactly 32 random bytes>
+```
+
+Encryption happens on the device before upload. The cloud does **not** receive the sync key or plaintext memory.
+
+Authenticated encryption binds:
+
+```text
+workspace + stream + key_id
+```
+
+The cloud persists only:
+
+```text
+node_id
+stream
+monotonic sequence
+key_id
+nonce
+ciphertext
+ciphertext SHA-256
+timestamps / tenant scope
+```
+
+Only the newest five encrypted envelopes per node/stream are retained. Peer Cognition snapshots can be preserved for recovery evidence, but one node's operational self-model is never silently merged into another node. Imported peer Memory is sanitized, deduplicated and confidence-capped.
+
+### Crash-recoverable device-key rotation
+
+v1.8 uses a two-phase Ed25519 key rotation rather than replacing the key in one unsafe step:
+
+```text
+generate replacement key locally
+        -> persist pending private key (0600)
+        -> PREPARE signed by old key + new key
+        -> persist rotation ID / new key ID
+        -> COMMIT signed by new key
+        -> atomically replace active local key
+        -> clear pending state
+```
+
+If the network drops after the server may have committed, KINGAIBOT keeps the pending key and rotation marker. The next retry or restart repeats the same COMMIT idempotently and completes the local transition. It does not generate a second identity.
+
+---
+
+## Cloud & Fleet Control Center
+
+The visual client now includes:
+
+```text
+http://127.0.0.1:18889/ui/cloud/
+```
+
+It shows:
+
+- enrollment / Local-First state;
+- Node ID, Workspace and current Key ID;
+- last heartbeat;
+- current policy version;
+- restart-required policy state;
+- last E2EE sync;
+- last key rotation;
+- pending key-rotation reconciliation;
+- latest cloud error.
+
+Admin actions:
+
+```text
+Pull Cloud Policy
+Sync Encrypted Continuity
+Rotate Device Key
+```
+
+The page does not persist or reveal the local Admin Token.
+
+Local admin API:
+
+```text
+GET  /v1/cloud/status
+POST /v1/cloud/policy/pull
+POST /v1/cloud/sync
+POST /v1/cloud/key/rotate
+```
+
+See `docs/CLOUD-FLEET.md`.
+
+---
+
+## Native communications
+
+The v1.7 unified Channel Gateway remains fully available in v1.8:
 
 - Telegram Bot API
 - Slack Events API + `chat.postMessage`
 - Discord HTTP interactions + bot messages
 - WhatsApp Cloud API
-- Existing normalized KING signed webhook/API channels
+- normalized KING signed webhook/API
 
-Native inbound endpoints:
+Native ingress:
 
 ```text
 /v1/adapters/telegram/{channel_id}
 /v1/adapters/slack/{channel_id}
 /v1/adapters/discord/{channel_id}
 /v1/adapters/whatsapp/{channel_id}
+/v1/inbound/{channel_id}
 ```
 
-The v1.6.1 compatibility endpoint remains available:
-
-```text
-POST /v1/inbound/{channel_id}
-```
-
-See `docs/CHANNEL-GATEWAY.md` for setup and secret naming.
-
-### Transport authentication
-
-Native provider traffic is verified before it enters normal agent execution:
+Transport verification:
 
 ```text
 Telegram -> webhook secret token
-Slack    -> v0 HMAC + timestamp replay window
+Slack    -> v0 HMAC + replay window
 Discord  -> Ed25519(timestamp + raw body)
 WhatsApp -> Meta SHA-256 webhook signature
 ```
 
-Known native outbound endpoints are pinned to credential-free HTTPS URLs on the official provider host. Lookalike hosts and insecure HTTP are rejected.
+Outbound external side effects use durable delivery state. Explicit rate limits can retry; ambiguous transport/5xx/crash-after-send enters reconciliation instead of blind replay.
 
-### Durable inbound idempotency
+See `docs/CHANNEL-GATEWAY.md`.
 
-Every accepted provider event receives deterministic durable receipt state:
+---
 
-```text
-transport verification
-    -> event receipt
-    -> trusted route/session mapping
-    -> Runtime Task
-    -> task_created receipt
-    -> accepted receipt
-    -> durable outbound delivery
-```
+## Memory, cognition and governed evolution
 
-A provider retry with the same event identity does not submit the user message again. If Task creation was already durable, recovery reattaches to that Task and repairs the outbound handoff.
+KINGAIBOT keeps an engineering operational self-model for continuity and learning:
 
-### Privacy-minimized channel identity
+- episodic execution experience;
+- provider success/failure observations;
+- bounded long-term memory;
+- learned advisory principles;
+- scheduled reflection;
+- repeated-failure evolution proposals.
 
-Raw platform identifiers are routing data, not ordinary agent memory.
-
-- Generic Session state receives a pseudonymous sender identity.
-- Task/audit records use bounded digests instead of copying raw platform IDs.
-- Raw reply targets live only in restricted route records.
-- Discord interaction tokens live only in restricted pending-delivery state and are redacted from admin API responses.
-
-### Crash-safe outbound delivery
-
-Outbound state is persisted before the external side effect:
+This is **not a claim of subjective consciousness**. Cognition and learned context cannot override user intent, authority envelopes, tool policy, approvals or audit.
 
 ```text
-waiting_task
-    -> sending
-    -> delivered
-    -> retry_wait       explicit rate limit only
-    -> reconciliation   ambiguous transport / 5xx / crash-after-send
-    -> failed           definite rejection
+experience
+  -> reflection
+  -> failure pattern
+  -> evolution proposal
+  -> evaluation / review
+  -> stage
+  -> signed release
+  -> rollback capability
 ```
-
-A restart that finds `sending` does **not** automatically resend. It moves the delivery to reconciliation so an operator can determine what happened externally.
-
-Admin-only operations:
-
-```text
-GET  /v1/platform/channel-gateway/status
-GET  /v1/platform/channel-gateway/pending
-GET  /v1/platform/channel-gateway/receipts
-POST /v1/platform/channel-gateway/pending/{id}/retry
-POST /v1/platform/channel-gateway/pending/{id}/resolve
-```
-
-### Provider webhook availability
-
-Health probes remain outside the business quota. Native webhook traffic has a separate high-volume coarse ingress quota keyed by provider source plus concrete adapter route, so one busy Channel cannot consume the quota of another Channel behind the same provider egress IP.
-
-This does not trust `X-Forwarded-For`; deployments that need forwarded client identity must explicitly establish a trusted reverse-proxy boundary.
-
-### Cognitive runtime
-
-KINGAIBOT keeps a durable operational self-model for continuity and learning:
-
-- episodic execution experience
-- provider success/failure observations
-- learned advisory principles
-- scheduled reflection
-- bounded memory
-- repeated-failure evolution proposals
-
-This is an engineering self-model, **not a claim of subjective consciousness**. Learned context cannot override system policy, user intent, authority envelopes, tool policy or approvals.
 
 Admin commands:
 
@@ -158,14 +269,11 @@ kingagent cognition
 kingagent reflect
 ```
 
-Admin API:
+See `docs/COGNITIVE-RUNTIME.md`.
 
-```text
-GET  /v1/cognition/status
-POST /v1/cognition/reflect
-```
+---
 
-### Universal model gateway
+## Universal model gateway
 
 Built-in provider patterns include:
 
@@ -180,52 +288,35 @@ Built-in provider patterns include:
 - vLLM
 - LocalAI
 
-Provider routing supports priority, failover and circuit breaking. Local/private endpoints must be explicitly allowed by configuration; public providers remain protected by the network guard.
-
-### Governed evolution
-
-Learning does not mean unrestricted self-modification.
-
-```text
-experience
-  -> reflection
-  -> failure pattern
-  -> evolution proposal
-  -> evaluation / review
-  -> stage
-  -> signed release
-  -> rollback capability
-```
-
-The cognitive subsystem can propose change; it cannot silently grant itself authority, edit production code or release itself outside the governed pipeline.
+Provider routing supports priority, failover and circuit breaking. Local/private endpoints require explicit network permission.
 
 ---
 
 ## Security invariants
 
-KINGAIBOT keeps the following boundaries even when running as a boot-level system service:
-
-1. **Model != authority.** Effective authority comes from trusted KING identity and Capability Envelopes.
-2. **Approval cannot be self-issued.** High-risk work remains operator/admin controlled.
-3. **Audit precedes trust expansion.** A resource does not become executable merely because a write succeeded.
-4. **Unknown side effects are reconciled.** Ambiguous real-world actions are not automatically replayed.
-5. **Secrets are not model context.** API keys and channel transport credentials stay in environment/protected secret storage.
-6. **Private network access is explicit.** Public provider calls cannot silently pivot into loopback/RFC1918 targets.
-7. **Learning is advisory.** Memory and cognition do not override policy or capability boundaries.
-8. **Release artifacts are verifiable.** Public releases include checksums, SBOM, provenance and Sigstore bundles.
+1. **Model != authority.** Effective authority comes from trusted identity and Capability Envelopes.
+2. **Cloud != authority expansion.** Remote policy is restriction-only.
+3. **Approval cannot be self-issued.** High-risk work remains operator/admin controlled.
+4. **Audit precedes trust expansion.** A resource does not become executable just because persistence succeeded.
+5. **Ambiguous effects reconcile.** Unknown real-world side effects are not automatically replayed.
+6. **Secrets are not model context.** Provider, channel, device and sync credentials remain protected data.
+7. **Private-network access is explicit.** Public provider/cloud paths cannot silently pivot to loopback/RFC1918 destinations.
+8. **Learning is advisory.** Memory/cognition cannot override authorization.
+9. **Device rotation is recoverable.** Uncertain rotation commits keep durable pending state.
+10. **Release artifacts are verifiable.** Releases include checksums, SBOM, provenance and Sigstore bundles.
 
 ---
 
-## Runtime services
+## Install
 
-### Linux
-
-The production installer uses a dedicated `kingagent` service user and systemd hardening. Runtime capabilities are dropped and the filesystem/home/tmp boundaries are restricted.
+### Linux system service
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kingaiwork/KINGAIBOT/main/scripts/install.sh \
   | sudo KINGAGENT_REQUIRE_SIGNATURE=1 bash -s -- kingaiwork/KINGAIBOT
 ```
+
+Runtime user: dedicated low-privilege `kingagent` system account.
 
 Configuration:
 
@@ -234,15 +325,9 @@ Configuration:
 /etc/kingagent/kingagent.env
 ```
 
-Health:
-
-```bash
-curl http://127.0.0.1:18888/healthz
-```
-
 ### Windows
 
-Run from Administrator PowerShell:
+Administrator PowerShell:
 
 ```powershell
 $env:KINGAGENT_REPO='kingaiwork/KINGAIBOT'
@@ -250,20 +335,42 @@ $env:KINGAGENT_REQUIRE_SIGNATURE='1'
 irm https://raw.githubusercontent.com/kingaiwork/KINGAIBOT/main/scripts/install.ps1 | iex
 ```
 
-The runtime service uses a low-privilege service identity; the signed updater uses SYSTEM only for the privileged update operation. Provider secrets are machine-protected under the KINGAgent ProgramData installation.
+Runtime identity is `NT AUTHORITY\LOCAL SERVICE`, not Administrator/SYSTEM. The signed updater alone uses SYSTEM.
 
-### macOS system service
+### macOS boot-level service
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kingaiwork/KINGAIBOT/main/scripts/install-macos-system.sh \
   | sudo KINGAGENT_REQUIRE_SIGNATURE=1 bash -s -- kingaiwork/KINGAIBOT
 ```
 
-The runtime LaunchDaemon runs as the selected non-root service user; system privilege is reserved for installation/update management.
+The LaunchDaemon runs as the selected non-root service user.
 
 ---
 
-## Visual Control Center
+## Enroll a device into KING AI Cloud
+
+Create a one-time `kop_enroll_...` token from an authorized KING AI OPS organization/workspace, then run the platform configurator.
+
+Linux / macOS system service:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kingaiwork/KINGAIBOT/main/scripts/configure-cloud.sh | sudo bash
+```
+
+Windows Administrator PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/kingaiwork/KINGAIBOT/main/scripts/configure-cloud.ps1 | iex
+```
+
+The configurator prompts for the one-time token without echoing it, restarts the existing low-privilege Runtime, verifies durable enrollment and then clears the raw token from service configuration.
+
+For encrypted continuity, set `KINGAI_MEMORY_SYNC=1` before running the configurator. If no sync key is supplied, the configurator generates a random 32-byte key locally. Provision that same key only to devices that are intentionally allowed to share continuity.
+
+---
+
+## Runtime and visual client
 
 Release packages include:
 
@@ -273,23 +380,33 @@ kingagent
 kingworker
 kingconsole
 kingdesktop
+configure-cloud.sh / configure-cloud.ps1
+cloud.env.example
 ```
 
-`kingdesktop` opens the local KING AI Control Center backed by `kingconsole`.
-
-Default local Control Center:
+Control Center:
 
 ```text
 http://127.0.0.1:18889/ui/
 ```
 
-The local visual client does not automatically disclose the admin token.
+Cloud & Fleet:
+
+```text
+http://127.0.0.1:18889/ui/cloud/
+```
+
+Health:
+
+```text
+http://127.0.0.1:18888/healthz
+```
 
 ---
 
 ## Release targets
 
-Each signed release is built for:
+Every formal signed release builds:
 
 ```text
 linux/amd64
@@ -300,7 +417,7 @@ windows/amd64
 windows/arm64
 ```
 
-Release assets also include:
+Release assets include:
 
 ```text
 SHA256SUMS
@@ -309,61 +426,32 @@ sbom.cdx.json
 *.sigstore.json
 ```
 
-The build pipeline verifies formatting, vet, race tests, vulnerability scanning, Windows/macOS native builds, container smoke/validation and release-version consistency before production publication.
+The release gate validates formatting, vet, race tests, vulnerability scanning, native Windows/macOS builds, containers, version consistency, SBOM, provenance and GitHub OIDC/Sigstore signing before publication.
 
 ---
 
-## 中文说明
+## 中文定位
 
-### 产品定位
-
-KINGAIBOT 是 KING AI 的受控执行层，不把大模型当作系统权限本身。
-
-它负责把用户、网站、聊天平台和业务系统的请求，经过统一身份、会话、记忆、权限、预算、审批、审计之后，交给 Agent Runtime、工具、Worker、MCP/A2A、云模型或本地模型执行，并把真实执行结果形成可追踪证据。
-
-### v1.7.0 新增
-
-- Telegram 原生双向接入
-- Slack 原生双向接入
-- Discord HTTP Interaction + Bot 消息
-- WhatsApp Cloud API 双向接入
-- 保留 v1.6.1 通用签名 Webhook/API
-- 原生平台签名/密钥验证
-- 外部用户 ID 隐私最小化
-- 持久化 Channel Route
-- 持久化 Outbound Queue
-- 防重复入站 Task
-- 不确定外发结果进入 Reconciliation，避免盲目重复发消息
-- 管理员可查看待处理、收据、人工 Retry/Resolve
-- Provider webhook 独立入口配额，避免平台共享出口 IP 相互误伤
-
-### 记忆、学习与“意识层”
-
-系统中的“意识层”是工程意义上的运行自我模型：状态连续性、自我观察、经验记录、反思和受控学习。它不是对真实主观意识的声明。
-
-系统可以从任务结果中形成经验并提出进化建议，但不能自行绕过权限、审批、测试、签名和发布链。
-
-### 模型接入
-
-既可以使用 OpenAI、Claude、Gemini、Groq、OpenRouter 等云端模型，也可以接 Ollama、LM Studio、vLLM、LocalAI 或其他兼容接口的私有模型。
-
-### 生产原则
+KINGAIBOT 1.8 已形成一条完整的长期运行链路：
 
 ```text
-用户请求
-  -> 可信传输
-  -> 身份 / 会话
-  -> 权限 / 预算
-  -> Policy / Approval
-  -> Audit
-  -> 执行
-  -> Evidence
-  -> 完成 或 Reconciliation
-  -> Memory / Learning
-  -> 受控 Evolution Proposal
+设备身份
+  -> 云端 Fleet
+  -> restriction-only 策略
+  -> 本地 Authority / Approval / Audit
+  -> Agent Runtime
+  -> 云模型 / 本地模型 / Tools / Worker
+  -> Evidence / Reconciliation
+  -> Memory / Cognition / Reflection
+  -> 端到端加密连续性
+  -> Governed Evolution
 ```
 
-KINGAIBOT 的目标不是“让 AI 拥有无限权限”，而是让长期运行的智能体在真实生产环境中做到：**可用、可控、可恢复、可审计、可升级、可回滚。**
+“云管理”不等于“云端接管本机”。云端负责身份、Fleet 健康、策略收紧和密文连续性；真正执行权限仍由每台机器自己的 Authority、Policy、Approval 和 Audit 决定。
+
+系统中的“意识层”仍然是工程意义上的运行自我模型——状态连续性、自我观察、经验、反思和受控学习——不是对真实主观意识的声明。
+
+目标仍然是：**可用、可控、可恢复、可审计、可升级、可回滚。**
 
 ---
 

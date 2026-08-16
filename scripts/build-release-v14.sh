@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${VERSION:-${GITHUB_REF_NAME:-1.7.0}}"
+VERSION="${VERSION:-${GITHUB_REF_NAME:-1.8.0}}"
 VERSION="${VERSION#v}"
 MIN_GO_VERSION="${KINGAGENT_MIN_RELEASE_GO:-1.26.6}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -67,15 +67,23 @@ build_target() {
 
   cp "$ROOT/configs/config.example.json" "$stage/config.example.json"
   cp "$ROOT/configs/providers.catalog.json" "$stage/providers.catalog.json"
+  [[ -f "$ROOT/configs/cloud.env.example" ]] && cp "$ROOT/configs/cloud.env.example" "$stage/cloud.env.example"
   cp "$ROOT/README.md" "$stage/README.md"
   cp "$ROOT/LICENSE-COMMERCIAL.txt" "$stage/LICENSE-COMMERCIAL.txt"
   cp "$ROOT/scripts/update.sh" "$stage/update.sh"
   cp "$ROOT/scripts/update.ps1" "$stage/update.ps1"
+  if [[ "$goos" == "windows" ]]; then
+    cp "$ROOT/scripts/configure-cloud.ps1" "$stage/configure-cloud.ps1"
+  else
+    cp "$ROOT/scripts/configure-cloud.sh" "$stage/configure-cloud.sh"
+  fi
   [[ "$goos" == "darwin" && -f "$ROOT/scripts/install-macos-system.sh" ]] && cp "$ROOT/scripts/install-macos-system.sh" "$stage/install-macos-system.sh"
   [[ -f "$ROOT/docs/PLATFORM.md" ]] && cp "$ROOT/docs/PLATFORM.md" "$stage/PLATFORM.md"
   [[ -f "$ROOT/docs/COGNITIVE-RUNTIME.md" ]] && cp "$ROOT/docs/COGNITIVE-RUNTIME.md" "$stage/COGNITIVE-RUNTIME.md"
   [[ -f "$ROOT/docs/CHANNEL-GATEWAY.md" ]] && cp "$ROOT/docs/CHANNEL-GATEWAY.md" "$stage/CHANNEL-GATEWAY.md"
+  [[ -f "$ROOT/docs/CLOUD-FLEET.md" ]] && cp "$ROOT/docs/CLOUD-FLEET.md" "$stage/CLOUD-FLEET.md"
   chmod 0755 "$stage/update.sh"
+  [[ -f "$stage/configure-cloud.sh" ]] && chmod 0755 "$stage/configure-cloud.sh"
   [[ -f "$stage/install-macos-system.sh" ]] && chmod 0755 "$stage/install-macos-system.sh"
   normalize_mtime "$stage"
 
@@ -120,8 +128,15 @@ cat > "$DIST/RELEASE-MANIFEST.json" <<EOF
   "binaries": ["kingagentd", "kingagent", "kingworker", "kingconsole", "kingdesktop"],
   "visual_client": "kingdesktop",
   "control_center": "http://127.0.0.1:18889/ui/",
+  "cloud_fleet_control_center": "http://127.0.0.1:18889/ui/cloud/",
   "cognitive_runtime": true,
   "unified_channel_gateway": true,
+  "cloud_device_identity": "ed25519",
+  "cloud_device_key_rotation": "two-phase-crash-recoverable",
+  "cloud_policy": "contraction-only",
+  "cloud_policy_refresh": "live-channel-contraction-static-restart-required",
+  "encrypted_continuity_sync": "AES-256-GCM",
+  "cloud_enrollment_configurators": ["configure-cloud.sh", "configure-cloud.ps1"],
   "native_channels": ["telegram", "slack", "discord", "whatsapp"],
   "provider_catalog": "providers.catalog.json",
   "macos_system_installer": "install-macos-system.sh",

@@ -33,9 +33,10 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/workgraph"
 )
 
-var version = "1.7.0"
+var version = "1.8.0"
 
 func main() {
+	startedAt := time.Now()
 	cfgPath := flag.String("config", "config.json", "configuration file")
 	showVersion := flag.Bool("version", false, "print version")
 	flag.Parse()
@@ -49,6 +50,15 @@ func main() {
 		os.Exit(1)
 	}
 	cfg.Version = version
+
+	// v1.8 cloud bootstrap is local-first. Existing Ed25519 node identity is
+	// loaded before runtime construction so a retrieved cloud policy can only
+	// contract local configuration. Cloud unavailability is not a local runtime
+	// outage unless KINGAI_CLOUD_REQUIRE_POLICY is explicitly enabled.
+	cloudManager, cloudPolicy, mustErr := prepareCloud(cfg, version)
+	must(mustErr)
+	defer cloudManager.Close()
+
 	ts, mustErr := task.NewStore(filepath.Join(cfg.Runtime.DataDir, "tasks"))
 	must(mustErr)
 	as, mustErr := approval.New(filepath.Join(cfg.Runtime.DataDir, "approvals"))
@@ -94,6 +104,7 @@ func main() {
 	pm, mustErr := platform.NewSafe(filepath.Join(cfg.Runtime.DataDir, "platform"), boundPlatformRuntime, el)
 	must(mustErr)
 	defer pm.Close()
+	must(pm.ApplyCloudChannelRestrictions(cloudPolicy.DisabledChannels))
 	platformExtension, mustErr := platform.NewV14Extension(pm)
 	must(mustErr)
 	tr.RegisterExtension(platformExtension)
@@ -119,6 +130,7 @@ func main() {
 	defer orchestrator.Close()
 
 	must(rt.Recover())
+	startCloud(cloudManager, cfg, pm, ms, ce, startedAt)
 
 	coreServer := api.New(cfg, rt, tr)
 	coreHandler := coreServer.Handler()
@@ -150,6 +162,7 @@ func main() {
 	inboundAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, pm.InboundAdminHandler())
 	statusScoped := pm.ScopedAuthHandler(cfg.Server.AdminTokenEnv, pm.StatusHandler())
 	channelGatewayAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, pm.ChannelGatewayAdminHandlerV170())
+	cloudAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, cloudManager.Handler())
 	root.Handle("/v1/platform/identities", identityAdmin)
 	root.Handle("/v1/platform/identities/", identityAdmin)
 	root.Handle("/v1/platform/access-keys", identityAdmin)
@@ -160,6 +173,7 @@ func main() {
 	root.Handle("/v1/platform/metrics", statusScoped)
 	root.Handle("/v1/platform/channel-gateway/", channelGatewayAdmin)
 	root.Handle("/v1/platform/", platformScoped)
+	root.Handle("/v1/cloud/", cloudAdmin)
 
 	// Scoped readers can see only approved knowledge. Proposal creation,
 	// inspection and review live under the distinct admin namespace.
@@ -214,9 +228,9 @@ func main() {
 	orchestrationAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, orchestrator.Handler())
 	root.Handle("/v1/orchestration/", orchestrationAdmin)
 
-	// v1.7 keeps the normalized signed gateway and adds native Telegram, Slack,
-	// Discord and WhatsApp Cloud ingress. Native replies are durable and do not
-	// expose platform sender identifiers in generic Session/Task/audit state.
+	// v1.7 keeps the normalized signed gateway and native Telegram, Slack,
+	// Discord and WhatsApp Cloud ingress. v1.8 cloud fleet management does not
+	// weaken or expose the channel credential boundary.
 	channelGateway := pm.InboundHandlerV170()
 	root.Handle("/v1/inbound/", channelGateway)
 	root.Handle("/v1/adapters/", channelGateway)
@@ -227,7 +241,7 @@ func main() {
 	// Health probes are deliberately quota-exempt inside HTTPGuard.
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: platform.HTTPGuard(root), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "v1.7.0-unified-channel-gateway", "knowledge", "safe", "cognition", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled", "native_channels", "telegram,slack,discord,whatsapp")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "v1.8.0-cloud-device-fleet", "cloud_enrolled", cloudManager.Snapshot().Enrolled, "cloud_policy_version", cloudManager.Snapshot().PolicyVersion, "memory_sync", cloudManager.Snapshot().MemorySyncEnabled, "knowledge", "safe", "cognition", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled", "native_channels", "telegram,slack,discord,whatsapp")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
