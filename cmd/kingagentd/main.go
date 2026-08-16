@@ -33,7 +33,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/workgraph"
 )
 
-var version = "1.6.0"
+var version = "1.6.1"
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "configuration file")
@@ -124,6 +124,16 @@ func main() {
 	coreHandler := coreServer.Handler()
 	root := http.NewServeMux()
 
+	// Health/readiness are exact routes outside the normal client quota so a
+	// supervisor cannot accidentally rate-limit itself into a restart loop.
+	probes := coreServer.ProbeHandler()
+	root.Handle("GET /healthz", probes)
+	root.Handle("GET /readyz", probes)
+
+	// Exact task creation maps temporary queue backpressure to 503+Retry-After
+	// instead of incorrectly treating runtime saturation as a caller error.
+	root.Handle("POST /v1/tasks", coreServer.TaskCreateHandlerV161())
+
 	// Runtime reconciliation and staged approval decisions are exact admin-only
 	// routes. They stay outside MCP/A2A/model tools because ambiguous side effects
 	// and trust expansion require operator review.
@@ -203,13 +213,18 @@ func main() {
 	root.Handle("/v1/orchestration/", orchestrationAdmin)
 
 	// Channel-specific inbound authentication, durable Session submission and
-	// conservative retry/reconciliation semantics are enforced in the v1.4 gateway.
-	root.Handle("/v1/inbound/", pm.InboundHandlerV14())
+	// conservative retry/reconciliation semantics are enforced in the v1.6.1
+	// gateway. Optional HMAC body signing is activated by provisioning
+	// <BEARER_TOKEN_ENV>_SIGNING_SECRET for a channel.
+	root.Handle("/v1/inbound/", pm.InboundHandlerV161())
 	root.Handle("/", coreHandler)
 
-	srv := &http.Server{Addr: cfg.Server.Listen, Handler: root, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
+	// Every daemon route, including specialized platform/channel/admin surfaces,
+	// receives one final bounded client-IP quota and common defensive headers.
+	// Health probes are deliberately quota-exempt inside HTTPGuard.
+	srv := &http.Server{Addr: cfg.Server.Listen, Handler: platform.HTTPGuard(root), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "v1.4-safe", "knowledge", "safe", "cognition", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "v1.6.1-hardened", "knowledge", "safe", "cognition", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
