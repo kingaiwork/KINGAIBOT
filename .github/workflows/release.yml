@@ -2,41 +2,66 @@ name: Release
 
 on:
   push:
+    branches: ['main']
     tags: ['v*']
   workflow_dispatch:
     inputs:
       publish_tag:
-        description: 'Create and publish this vMAJOR.MINOR.PATCH tag from main; leave empty when dispatching on an existing tag'
+        description: 'Optional vMAJOR.MINOR.PATCH tag to publish from main; empty uses VERSION'
         required: false
         type: string
         default: ''
 
 jobs:
   prepare-tag:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_tag != ''
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
-      - name: Validate and create immutable release tag
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve immutable release tag
+        id: version
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.publish_tag }}
+          INPUT_TAG: ${{ inputs.publish_tag }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -n "${INPUT_TAG:-}" ]]; then
+            TAG="$INPUT_TAG"
+          else
+            test -f VERSION || { echo "VERSION file is required for automatic releases" >&2; exit 2; }
+            VERSION_VALUE="$(tr -d '[:space:]' < VERSION)"
+            TAG="v${VERSION_VALUE}"
+          fi
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9._-]+)?$ ]] || {
-            echo "publish_tag must be vMAJOR.MINOR.PATCH (optional suffix allowed)" >&2
+            echo "release tag must be vMAJOR.MINOR.PATCH (optional suffix allowed)" >&2
             exit 2
           }
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Create immutable tag and dispatch tagged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Ref refs/tags/${TAG} already exists; refusing to move or overwrite a release tag." >&2
-            exit 3
+            echo "${TAG} already exists; no automatic release is needed."
+            exit 0
           fi
           gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
             -f ref="refs/tags/${TAG}" \
             -f sha="${GITHUB_SHA}" >/dev/null
-          echo "Created immutable tag ${TAG} at ${GITHUB_SHA}. The tag push event is the single release trigger."
+          echo "Created immutable tag ${TAG} at ${GITHUB_SHA}."
+          # Tag events created with GITHUB_TOKEN do not recursively start normal
+          # workflows, so explicitly dispatch this workflow on the immutable tag.
+          gh workflow run release.yml --ref "$TAG"
+          echo "Dispatched signed release workflow for ${TAG}."
 
   release:
     if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -63,6 +88,12 @@ jobs:
             echo "Release must run from a version tag." >&2
             exit 2
           }
+          test -f VERSION
+          expected="v$(tr -d '[:space:]' < VERSION)"
+          [[ "$GITHUB_REF_NAME" == "$expected" ]] || {
+            echo "Tag $GITHUB_REF_NAME does not match VERSION ($expected)." >&2
+            exit 2
+          }
       - name: Security and correctness gate
         run: |
           test -z "$(gofmt -l .)"
@@ -70,7 +101,7 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
           govulncheck ./...
           go test -race -count=1 ./...
-      - name: Build v1.4 six-target release artifacts
+      - name: Build six-target runtime + visual client release
         env:
           VERSION: ${{ github.ref_name }}
           KINGAGENT_MIN_RELEASE_GO: 1.26.6
