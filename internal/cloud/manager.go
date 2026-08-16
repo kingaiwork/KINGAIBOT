@@ -66,41 +66,48 @@ type Telemetry struct {
 }
 
 type State struct {
-	NodeID            string    `json:"node_id,omitempty"`
-	KeyID             string    `json:"key_id,omitempty"`
-	OrganizationID    string    `json:"organization_id,omitempty"`
-	WorkspaceID       string    `json:"workspace_id,omitempty"`
-	Sequence          int64     `json:"sequence"`
-	SyncSequence      int64     `json:"sync_sequence"`
-	PolicyVersion     int       `json:"policy_version"`
-	LastHeartbeatAt   time.Time `json:"last_heartbeat_at,omitempty"`
-	LastPolicyAt      time.Time `json:"last_policy_at,omitempty"`
-	LastSyncAt        time.Time `json:"last_sync_at,omitempty"`
-	LastError         string    `json:"last_error,omitempty"`
-	Enrolled          bool      `json:"enrolled"`
-	CloudEnabled      bool      `json:"cloud_enabled"`
-	MemorySyncEnabled bool      `json:"memory_sync_enabled"`
+	NodeID                string    `json:"node_id,omitempty"`
+	KeyID                 string    `json:"key_id,omitempty"`
+	OrganizationID        string    `json:"organization_id,omitempty"`
+	WorkspaceID           string    `json:"workspace_id,omitempty"`
+	Sequence              int64     `json:"sequence"`
+	SyncSequence          int64     `json:"sync_sequence"`
+	PolicyVersion         int       `json:"policy_version"`
+	PolicyRestartRequired bool      `json:"policy_restart_required"`
+	LastHeartbeatAt       time.Time `json:"last_heartbeat_at,omitempty"`
+	LastPolicyAt          time.Time `json:"last_policy_at,omitempty"`
+	LastSyncAt            time.Time `json:"last_sync_at,omitempty"`
+	LastKeyRotationAt     time.Time `json:"last_key_rotation_at,omitempty"`
+	LastError             string    `json:"last_error,omitempty"`
+	Enrolled              bool      `json:"enrolled"`
+	CloudEnabled          bool      `json:"cloud_enabled"`
+	MemorySyncEnabled     bool      `json:"memory_sync_enabled"`
 }
 
 type SnapshotProvider func(context.Context) ([]byte, error)
 type ImportProvider func(context.Context, []byte) error
 type TelemetryProvider func() Telemetry
+type PolicyApplier func(Policy) (bool, error)
 
 type Manager struct {
-	cfg        Config
-	dir        string
-	statePath  string
-	keyPath    string
-	client     *http.Client
+	cfg       Config
+	dir       string
+	statePath string
+	keyPath   string
+	client    *http.Client
+
+	keyMu      sync.RWMutex
 	privateKey ed25519.PrivateKey
 	publicSPKI string
+	rotationMu sync.Mutex
 
-	mu     sync.RWMutex
-	state  State
-	policy Policy
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	mu            sync.RWMutex
+	state         State
+	policy        Policy
+	policyApplier PolicyApplier
+	ctx           context.Context
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
 
 	telemetry TelemetryProvider
 	export    SnapshotProvider
@@ -210,6 +217,7 @@ func (m *Manager) saveState() error {
 
 func (m *Manager) loadOrCreateKey() error {
 	b, err := os.ReadFile(m.keyPath)
+	var priv ed25519.PrivateKey
 	if err == nil {
 		block, _ := pem.Decode(b)
 		if block == nil || block.Type != "PRIVATE KEY" {
@@ -219,32 +227,35 @@ func (m *Manager) loadOrCreateKey() error {
 		if err != nil {
 			return err
 		}
-		priv, ok := key.(ed25519.PrivateKey)
+		var ok bool
+		priv, ok = key.(ed25519.PrivateKey)
 		if !ok {
 			return errors.New("cloud device key is not Ed25519")
 		}
-		m.privateKey = priv
 	} else if errors.Is(err, os.ErrNotExist) {
-		_, priv, err := ed25519.GenerateKey(rand.Reader)
+		_, generated, err := ed25519.GenerateKey(rand.Reader)
 		if err != nil {
 			return err
 		}
-		der, err := x509.MarshalPKCS8PrivateKey(priv)
+		der, err := x509.MarshalPKCS8PrivateKey(generated)
 		if err != nil {
 			return err
 		}
 		if err := storage.AtomicWriteFile(m.keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600); err != nil {
 			return err
 		}
-		m.privateKey = priv
+		priv = generated
 	} else {
 		return err
 	}
-	spki, err := x509.MarshalPKIXPublicKey(m.privateKey.Public())
+	spki, err := x509.MarshalPKIXPublicKey(priv.Public())
 	if err != nil {
 		return err
 	}
+	m.keyMu.Lock()
+	m.privateKey = priv
 	m.publicSPKI = base64.StdEncoding.EncodeToString(spki)
+	m.keyMu.Unlock()
 	return nil
 }
 
@@ -257,7 +268,15 @@ func nonce() (string, error) {
 }
 
 func (m *Manager) sign(message string) string {
+	m.keyMu.RLock()
+	defer m.keyMu.RUnlock()
 	return base64.StdEncoding.EncodeToString(ed25519.Sign(m.privateKey, []byte(message)))
+}
+
+func (m *Manager) publicKeySPKI() string {
+	m.keyMu.RLock()
+	defer m.keyMu.RUnlock()
+	return m.publicSPKI
 }
 
 func (m *Manager) endpoint(path string) string {
@@ -323,6 +342,10 @@ func (m *Manager) Bootstrap(ctx context.Context, agentVersion string) (Policy, e
 	enrolled = m.state.Enrolled && m.state.NodeID != ""
 	m.mu.RUnlock()
 	if enrolled {
+		if err := m.RecoverKeyRotation(ctx); err != nil {
+			m.setError(err)
+			return Policy{}, err
+		}
 		p, err := m.PullPolicy(ctx)
 		if err != nil {
 			m.setError(err)
@@ -344,8 +367,9 @@ func (m *Manager) enroll(ctx context.Context, token, agentVersion string) error 
 	}
 	ts := time.Now().Unix()
 	display := "KINGAIBOT@" + hostname
-	message := strings.Join([]string{"KINGAI-OPS-ENROLL-V2", fmt.Sprint(ts), n, display, hostname, m.cfg.Environment, m.cfg.NodeClass, m.cfg.Provider, m.cfg.Region, runtime.GOOS, runtime.GOOS, runtime.GOARCH, agentVersion, m.publicSPKI}, "\n")
-	payload := map[string]any{"timestamp": ts, "nonce": n, "display_name": display, "hostname": hostname, "environment": m.cfg.Environment, "node_class": m.cfg.NodeClass, "provider": m.cfg.Provider, "region": m.cfg.Region, "os_family": runtime.GOOS, "os_version": runtime.GOOS, "architecture": runtime.GOARCH, "agent_version": agentVersion, "public_key_spki_b64": m.publicSPKI, "signature_b64": m.sign(message)}
+	publicSPKI := m.publicKeySPKI()
+	message := strings.Join([]string{"KINGAI-OPS-ENROLL-V2", fmt.Sprint(ts), n, display, hostname, m.cfg.Environment, m.cfg.NodeClass, m.cfg.Provider, m.cfg.Region, runtime.GOOS, runtime.GOOS, runtime.GOARCH, agentVersion, publicSPKI}, "\n")
+	payload := map[string]any{"timestamp": ts, "nonce": n, "display_name": display, "hostname": hostname, "environment": m.cfg.Environment, "node_class": m.cfg.NodeClass, "provider": m.cfg.Provider, "region": m.cfg.Region, "os_family": runtime.GOOS, "os_version": runtime.GOOS, "architecture": runtime.GOARCH, "agent_version": agentVersion, "public_key_spki_b64": publicSPKI, "signature_b64": m.sign(message)}
 	var response struct {
 		NodeID         string `json:"node_id"`
 		KeyID          string `json:"key_id"`
@@ -369,12 +393,22 @@ func (m *Manager) enroll(ctx context.Context, token, agentVersion string) error 
 	return m.saveState()
 }
 
+func (m *Manager) SetPolicyApplier(applier PolicyApplier) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.policyApplier = applier
+	m.mu.Unlock()
+}
+
 func (m *Manager) PullPolicy(ctx context.Context) (Policy, error) {
 	if m == nil || !m.cfg.Enabled {
 		return Policy{}, nil
 	}
 	m.mu.RLock()
 	nodeID := m.state.NodeID
+	applier := m.policyApplier
 	m.mu.RUnlock()
 	if nodeID == "" {
 		return Policy{}, errors.New("cloud node is not enrolled")
@@ -392,9 +426,17 @@ func (m *Manager) PullPolicy(ctx context.Context) (Policy, error) {
 	if err := m.post(ctx, "/api/v1/ops/nodes/cloud/pull", payload, "", &response); err != nil {
 		return Policy{}, err
 	}
+	restartRequired := false
+	if applier != nil {
+		restartRequired, err = applier(response.Policy)
+		if err != nil {
+			return Policy{}, err
+		}
+	}
 	m.mu.Lock()
 	m.policy = response.Policy
 	m.state.PolicyVersion = response.Policy.Version
+	m.state.PolicyRestartRequired = restartRequired
 	m.state.LastPolicyAt = time.Now().UTC()
 	m.state.LastError = ""
 	m.mu.Unlock()
