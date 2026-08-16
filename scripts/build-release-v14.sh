@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${VERSION:-${GITHUB_REF_NAME:-1.4.0}}"
+VERSION="${VERSION:-${GITHUB_REF_NAME:-1.5.0}}"
 VERSION="${VERSION#v}"
 MIN_GO_VERSION="${KINGAGENT_MIN_RELEASE_GO:-1.26.6}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -57,7 +57,7 @@ build_target() {
   [[ "$goos" == "windows" ]] && ext=".exe"
   mkdir -p "$stage"
 
-  for cmd in kingagentd kingagent kingworker kingconsole; do
+  for cmd in kingagentd kingagent kingworker kingconsole kingdesktop; do
     local ldflags="-s -w"
     [[ "$cmd" != "kingagent" ]] && ldflags="-s -w -X main.version=$VERSION"
     CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
@@ -74,11 +74,14 @@ build_target() {
   chmod 0755 "$stage/update.sh"
   normalize_mtime "$stage"
 
+  # Canonical asset names intentionally omit the version. GitHub Release tags
+  # provide immutable version identity while install/update scripts can always
+  # consume releases/latest/download/kingaibot_<os>_<arch>.<ext>.
   if [[ "$goos" == "windows" ]]; then
-    local archive="$DIST/kingaibot_${VERSION}_${goos}_${goarch}.zip"
+    local archive="$DIST/kingaibot_${goos}_${goarch}.zip"
     (cd "$stage" && find . -type f -print | LC_ALL=C sort | zip -q -X "$archive" -@)
   else
-    local archive="$DIST/kingaibot_${VERSION}_${goos}_${goarch}.tar.gz"
+    local archive="$DIST/kingaibot_${goos}_${goarch}.tar.gz"
     tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
       -C "$stage" -cf - . | gzip -n > "$archive"
   fi
@@ -109,10 +112,12 @@ cat > "$DIST/RELEASE-MANIFEST.json" <<EOF
   "product": "KINGAIBOT",
   "version": "$VERSION",
   "go": "$GO_VERSION",
-  "binaries": ["kingagentd", "kingagent", "kingworker", "kingconsole"],
+  "binaries": ["kingagentd", "kingagent", "kingworker", "kingconsole", "kingdesktop"],
+  "visual_client": "kingdesktop",
+  "control_center": "http://127.0.0.1:18889/ui/",
   "targets": ["linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64", "windows/arm64"]
 }
 EOF
 normalize_mtime "$DIST"
 
-echo "Full KINGAIBOT v1.4 release written to $DIST"
+echo "Full KINGAIBOT release written to $DIST"
