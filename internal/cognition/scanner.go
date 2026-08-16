@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	learningScanInterval = 15 * time.Second
-	learningScanBatch    = 2048
+	learningScanInterval  = 15 * time.Second
+	learningScanBatch     = 2048
 	learningCursorOverlap = 2 * time.Second
 )
 
