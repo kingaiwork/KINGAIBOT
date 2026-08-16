@@ -6,6 +6,8 @@ KINGAIBOT is the secure, durable and model-agnostic digital-employee execution p
 
 Start here:
 
+- [v1.6.1 Production Hardening](PRODUCTION-HARDENING.md)
+- [Cognitive Runtime](COGNITIVE-RUNTIME.md)
 - [Visual Clients & Platform Installation](VISUAL-CLIENTS.md)
 - [v1.4 Governance & Replay-Safety](V14_GOVERNANCE_STATUS.md)
 - [Product Definition](PRODUCT.md)
@@ -38,6 +40,8 @@ KINGAIBOT 是 KING AI 智慧生命体面向数字员工、私有部署和企业�
 
 建议入口：
 
+- [v1.6.1 生产加固](PRODUCTION-HARDENING.md)
+- [认知运行时](COGNITIVE-RUNTIME.md)
 - [可视化客户端与多平台安装](VISUAL-CLIENTS.md)
 - [v1.4 治理与防重复执行](V14_GOVERNANCE_STATUS.md)
 - [产品定义](PRODUCT.md)

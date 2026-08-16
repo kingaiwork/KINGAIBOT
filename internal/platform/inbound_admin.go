@@ -75,6 +75,18 @@ func taskMetadataString(metadata map[string]any, key string) string {
 	return strings.TrimSpace(value)
 }
 
+// taskSenderMatchesReceipt accepts the privacy-minimized v1.6.1 task metadata
+// and the pre-v1.6.1 raw-sender representation. This preserves reconciliation
+// across upgrades without copying new external account identifiers into every
+// durable Task record.
+func taskSenderMatchesReceipt(metadata map[string]any, sender string) bool {
+	if digest := taskMetadataString(metadata, "sender_sha256_96"); digest != "" {
+		return digest == senderDigest(sender)
+	}
+	legacySender := taskMetadataString(metadata, "sender")
+	return legacySender != "" && legacySender == sender
+}
+
 // ReconcileInboundReceipt resolves an ambiguous receipt without creating new
 // work. link_task requires an already-existing Session task whose durable
 // metadata proves it belongs to the same channel/sender. mark_failed is a
@@ -138,7 +150,7 @@ func (m *Manager) ReconcileInboundReceipt(id, decision, taskID, note string) (*I
 	if taskMetadataString(t.Metadata, "channel") != receipt.ChannelID {
 		return nil, errors.New("task channel does not match receipt")
 	}
-	if taskMetadataString(t.Metadata, "sender") != receipt.Sender {
+	if !taskSenderMatchesReceipt(t.Metadata, receipt.Sender) {
 		return nil, errors.New("task sender does not match receipt")
 	}
 	if receipt.SessionID != "" && receipt.SessionID != sessionID {

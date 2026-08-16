@@ -74,9 +74,15 @@ func (l *rootLimiter) allow(key string, now time.Time) bool {
 	return entry.Count <= rootRateLimit
 }
 
+func probePath(path string) bool {
+	return path == "/healthz" || path == "/readyz"
+}
+
 // HTTPGuard is the outermost daemon HTTP defense. It deliberately does not
 // trust X-Forwarded-For because a deployment must explicitly configure a
 // trusted reverse-proxy boundary before forwarded client identity is safe.
+// Liveness/readiness probes are excluded from quota accounting so an external
+// supervisor cannot accidentally create a self-induced restart loop.
 func HTTPGuard(next http.Handler) http.Handler {
 	limiter := newRootLimiter()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +91,7 @@ func HTTPGuard(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
-		if !limiter.allow(remoteKey(r), time.Now().UTC()) {
+		if !probePath(r.URL.Path) && !limiter.allow(remoteKey(r), time.Now().UTC()) {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.Header().Set("Retry-After", "60")
 			w.WriteHeader(http.StatusTooManyRequests)

@@ -10,17 +10,32 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/task"
 )
 
+const (
+	learningScanInterval  = 15 * time.Second
+	learningScanBatch     = 2048
+	learningCursorOverlap = 2 * time.Second
+)
+
 type TaskReader interface {
 	List() ([]*task.Task, error)
 }
 
+type incrementalTaskReader interface {
+	ListUpdatedSince(time.Time, int) ([]*task.Task, error)
+}
+
 type processedTaskState struct {
-	Tasks map[string]string `json:"tasks"`
+	Tasks  map[string]string `json:"tasks"`
+	Cursor time.Time         `json:"cursor,omitempty"`
 }
 
 // AttachTasks starts a conservative learning loop over durable terminal task
 // records. Learning is derived only from committed task state; it never replays
 // tasks and never grants authority to the model or evolution subsystem.
+//
+// When the task store exposes ListUpdatedSince, the scanner uses a bounded
+// incremental cursor with a small overlap. This keeps steady-state disk I/O
+// proportional to recently changed tasks instead of total historical volume.
 func (e *Engine) AttachTasks(reader TaskReader) error {
 	if e == nil || !e.cfg.Enabled || reader == nil {
 		return nil
@@ -39,7 +54,9 @@ func (e *Engine) AttachTasks(reader TaskReader) error {
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
-		ticker := time.NewTicker(10 * time.Second)
+		// Reconcile one batch immediately at boot, then poll at a bounded cadence.
+		learnCommittedTasks(e, reader, path, &state)
+		ticker := time.NewTicker(learningScanInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -53,14 +70,34 @@ func (e *Engine) AttachTasks(reader TaskReader) error {
 	return nil
 }
 
+func readLearningBatch(reader TaskReader, state *processedTaskState) ([]*task.Task, error) {
+	if incremental, ok := reader.(incrementalTaskReader); ok {
+		since := state.Cursor
+		if !since.IsZero() {
+			since = since.Add(-learningCursorOverlap)
+		}
+		return incremental.ListUpdatedSince(since, learningScanBatch)
+	}
+	return reader.List()
+}
+
 func learnCommittedTasks(e *Engine, reader TaskReader, path string, state *processedTaskState) {
-	tasks, err := reader.List()
+	tasks, err := readLearningBatch(reader, state)
 	if err != nil {
 		return
 	}
 	changed := false
+	cursorChanged := false
+	maxUpdated := state.Cursor
 	for _, t := range tasks {
-		if t == nil || (t.Status != task.Completed && t.Status != task.Failed) {
+		if t == nil {
+			continue
+		}
+		if t.UpdatedAt.After(maxUpdated) {
+			maxUpdated = t.UpdatedAt
+			cursorChanged = true
+		}
+		if t.Status != task.Completed && t.Status != task.Failed {
 			continue
 		}
 		fingerprint := string(t.Status) + ":" + t.UpdatedAt.UTC().Format(time.RFC3339Nano) + ":" + digest(t.Output+"\n"+t.Error)
@@ -79,23 +116,25 @@ func learnCommittedTasks(e *Engine, reader TaskReader, path string, state *proce
 		state.Tasks[t.ID] = fingerprint
 		changed = true
 	}
-	if !changed {
+	if cursorChanged {
+		state.Cursor = maxUpdated
+	}
+	if !changed && !cursorChanged {
 		return
 	}
-	// Keep the deduplication index bounded. task.Store.List returns newest first,
-	// so retaining the newest 10k terminal tasks is sufficient for restart-safe
-	// learning without allowing this sidecar to grow forever.
+
+	// Keep the deduplication index bounded. Incremental scanning only revisits a
+	// short overlap window, so arbitrary eviction of old fingerprints is safe:
+	// evicted ancient tasks are behind the persisted cursor and are not rescanned.
 	if len(state.Tasks) > 20000 {
-		keep := make(map[string]string, 10000)
-		for _, t := range tasks {
-			if len(keep) >= 10000 {
+		remove := len(state.Tasks) - 10000
+		for id := range state.Tasks {
+			delete(state.Tasks, id)
+			remove--
+			if remove <= 0 {
 				break
 			}
-			if v, ok := state.Tasks[t.ID]; ok {
-				keep[t.ID] = v
-			}
 		}
-		state.Tasks = keep
 	}
 	if b, err := json.MarshalIndent(state, "", "  "); err == nil {
 		_ = storage.AtomicWriteFile(path, b, 0o600)
