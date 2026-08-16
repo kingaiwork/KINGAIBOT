@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -75,10 +76,31 @@ type encryptedContinuitySnapshot struct {
 	Notice        string             `json:"notice"`
 }
 
+func staticCloudPolicyChanged(startup, current cloud.Policy) bool {
+	return !reflect.DeepEqual(startup.DisabledProviders, current.DisabledProviders) ||
+		startup.MaxSteps != current.MaxSteps ||
+		startup.MaxWorkerCount != current.MaxWorkerCount ||
+		startup.MaxTaskTimeoutSeconds != current.MaxTaskTimeoutSeconds ||
+		startup.DefaultToolPolicy != current.DefaultToolPolicy ||
+		!reflect.DeepEqual(startup.ToolPolicies, current.ToolPolicies)
+}
+
 func startCloud(manager *cloud.Manager, cfg *config.Config, pm *platform.Manager, ms *memory.Store, ce *cognition.Engine, startedAt time.Time) {
 	if manager == nil {
 		return
 	}
+	startupPolicy := manager.Policy()
+	manager.SetPolicyApplier(func(policy cloud.Policy) (bool, error) {
+		// Channel contraction is safe to enforce live: the operation is audit-first
+		// and can only disable. Runtime/provider/tool-policy changes are staged and
+		// explicitly marked restart-required because those components are immutable
+		// for the lifetime of this process; pretending they changed live would weaken
+		// the governance contract.
+		if err := pm.ApplyCloudChannelRestrictions(policy.DisabledChannels); err != nil {
+			return true, err
+		}
+		return staticCloudPolicyChanged(startupPolicy, policy), nil
+	})
 	manager.Start(func() cloud.Telemetry {
 		health := 100
 		status := "healthy"
