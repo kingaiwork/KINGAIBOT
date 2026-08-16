@@ -36,8 +36,8 @@ type Config struct {
 	EnrollmentTokenEnv  string
 	Environment         string
 	NodeClass           string
-	Provider             string
-	Region               string
+	Provider            string
+	Region              string
 	HeartbeatInterval   time.Duration
 	SyncInterval        time.Duration
 	SyncEnabled         bool
