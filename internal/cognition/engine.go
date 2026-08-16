@@ -45,20 +45,20 @@ type Principle struct {
 }
 
 type State struct {
-	SchemaVersion       int                      `json:"schema_version"`
-	Identity            string                   `json:"identity"`
-	Mode                string                   `json:"mode"`
-	BootID              string                   `json:"boot_id"`
-	BootCount           int                      `json:"boot_count"`
-	LastBootAt          time.Time                `json:"last_boot_at"`
-	LastReflectionAt    time.Time                `json:"last_reflection_at,omitempty"`
-	Episodes            int                      `json:"episodes"`
-	Successes           int                      `json:"successes"`
-	Failures            int                      `json:"failures"`
+	SchemaVersion       int                       `json:"schema_version"`
+	Identity            string                    `json:"identity"`
+	Mode                string                    `json:"mode"`
+	BootID              string                    `json:"boot_id"`
+	BootCount           int                       `json:"boot_count"`
+	LastBootAt          time.Time                 `json:"last_boot_at"`
+	LastReflectionAt    time.Time                 `json:"last_reflection_at,omitempty"`
+	Episodes            int                       `json:"episodes"`
+	Successes           int                       `json:"successes"`
+	Failures            int                       `json:"failures"`
 	ProviderStats       map[string]*ProviderStats `json:"provider_stats"`
-	FailurePatterns     map[string]int           `json:"failure_patterns"`
-	FailureProposalMark map[string]int           `json:"failure_proposal_mark"`
-	Principles          []Principle              `json:"principles"`
+	FailurePatterns     map[string]int            `json:"failure_patterns"`
+	FailureProposalMark map[string]int            `json:"failure_proposal_mark"`
+	Principles          []Principle               `json:"principles"`
 }
 
 type Snapshot struct {
