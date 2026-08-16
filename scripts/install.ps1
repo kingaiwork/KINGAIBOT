@@ -67,13 +67,14 @@ try {
   $workspace = Join-Path $data "workspace"
   $clientRoot = Join-Path $root "client"
   $clientBin = Join-Path $clientRoot "bin"
+  $providerSecrets = Join-Path $root "provider-secrets"
   $taskName = "KINGAIBOT"
   $updateTask = "KINGAIBOT Update"
   schtasks.exe /End /TN $taskName 2>$null | Out-Null
   schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null
   schtasks.exe /End /TN $updateTask 2>$null | Out-Null
   schtasks.exe /Delete /TN $updateTask /F 2>$null | Out-Null
-  New-Item -ItemType Directory -Force $bin,$workspace,$clientBin | Out-Null
+  New-Item -ItemType Directory -Force $bin,$workspace,$clientBin,$providerSecrets | Out-Null
 
   Copy-Item (Join-Path $pkg "kingagentd.exe") (Join-Path $bin "kingagentd.exe") -Force
   Copy-Item (Join-Path $pkg "kingagent.exe") (Join-Path $bin "kingagent.exe") -Force
@@ -83,6 +84,8 @@ try {
   Copy-Item (Join-Path $pkg "kingconsole.exe") (Join-Path $clientBin "kingconsole.exe") -Force
   Copy-Item (Join-Path $pkg "kingdesktop.exe") (Join-Path $clientBin "kingdesktop.exe") -Force
   Copy-Item (Join-Path $pkg "update.ps1") (Join-Path $root "update.ps1") -Force
+  if (Test-Path (Join-Path $pkg "providers.catalog.json")) { Copy-Item (Join-Path $pkg "providers.catalog.json") (Join-Path $root "providers.catalog.json") -Force }
+  if (Test-Path (Join-Path $pkg "COGNITIVE-RUNTIME.md")) { Copy-Item (Join-Path $pkg "COGNITIVE-RUNTIME.md") (Join-Path $root "COGNITIVE-RUNTIME.md") -Force }
 
   $config = Join-Path $root "config.json"
   if (-not (Test-Path $config)) {
@@ -103,18 +106,31 @@ try {
   Ensure-RandomTokenFile $mcpTokenFile
   Ensure-RandomTokenFile $a2aTokenFile
   [Environment]::SetEnvironmentVariable("KINGAGENT_REPO",$Repo,"Machine")
-  $modelKeyFile = Join-Path $root "model-api-key.txt"
-  if (-not (Test-Path $modelKeyFile)) {
+
+  # Provider secrets are extensible: any NAME.txt matching a safe environment
+  # variable name is injected into the low-privilege runtime process only.
+  $legacyModelKeyFile = Join-Path $root "model-api-key.txt"
+  $openAISecret = Join-Path $providerSecrets "OPENAI_API_KEY.txt"
+  if (-not (Test-Path $openAISecret)) {
     $existingModelKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY','Machine')
-    [IO.File]::WriteAllText($modelKeyFile, $(if ($existingModelKey) { $existingModelKey } else { "" }), (New-Object Text.UTF8Encoding($false)))
+    if ((-not $existingModelKey) -and (Test-Path $legacyModelKeyFile)) { $existingModelKey = (Get-Content $legacyModelKeyFile -Raw).Trim() }
+    [IO.File]::WriteAllText($openAISecret, $(if ($existingModelKey) { $existingModelKey } else { "" }), (New-Object Text.UTF8Encoding($false)))
     if ($existingModelKey) { [Environment]::SetEnvironmentVariable('OPENAI_API_KEY',$null,'Machine') }
+  }
+  foreach ($envName in @('ANTHROPIC_API_KEY','GEMINI_API_KEY','OPENROUTER_API_KEY','GROQ_API_KEY','COMPATIBLE_MODEL_API_KEY')) {
+    $secretPath = Join-Path $providerSecrets ($envName + '.txt')
+    if (-not (Test-Path $secretPath)) { [IO.File]::WriteAllText($secretPath, "", (New-Object Text.UTF8Encoding($false))) }
   }
 
   & icacls.exe $root /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)RX" | Out-Null
   & icacls.exe $data /grant:r "*S-1-5-19:(OI)(CI)M" | Out-Null
   & icacls.exe $clientRoot /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
-  foreach ($tokenFile in @($adminTokenFile,$mcpTokenFile,$a2aTokenFile,$modelKeyFile)) {
+  & icacls.exe $providerSecrets /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)RX" | Out-Null
+  foreach ($tokenFile in @($adminTokenFile,$mcpTokenFile,$a2aTokenFile)) {
     & icacls.exe $tokenFile /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" "*S-1-5-19:R" | Out-Null
+  }
+  Get-ChildItem -LiteralPath $providerSecrets -Filter '*.txt' -File | ForEach-Object {
+    & icacls.exe $_.FullName /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" "*S-1-5-19:R" | Out-Null
   }
 
   $runScript = Join-Path $root "run.ps1"
@@ -124,8 +140,13 @@ try {
 `$env:KINGAGENT_MCP_TOKEN = (Get-Content '$mcpTokenFile' -Raw).Trim()
 `$env:KINGAGENT_A2A_TOKEN = (Get-Content '$a2aTokenFile' -Raw).Trim()
 `$env:KINGAGENT_REPO = '$Repo'
-`$modelKey = (Get-Content '$modelKeyFile' -Raw).Trim()
-if (`$modelKey) { `$env:OPENAI_API_KEY = `$modelKey }
+Get-ChildItem -LiteralPath '$providerSecrets' -Filter '*.txt' -File | ForEach-Object {
+  `$envName = [IO.Path]::GetFileNameWithoutExtension(`$_.Name)
+  if (`$envName -match '^[A-Z][A-Z0-9_]{1,127}$') {
+    `$secretValue = (Get-Content -LiteralPath `$_.FullName -Raw).Trim()
+    if (`$secretValue) { [Environment]::SetEnvironmentVariable(`$envName, `$secretValue, 'Process') }
+  }
+}
 & '$bin\kingagentd.exe' -config '$config'
 exit `$LASTEXITCODE
 "@ | Set-Content -Encoding UTF8 $runScript
@@ -149,9 +170,11 @@ exit `$LASTEXITCODE
 
   Write-Host "KINGAIBOT installed to $root"
   Write-Host "Runtime identity: NT AUTHORITY\LOCAL SERVICE (not Administrator/SYSTEM)."
+  Write-Host "Signed updater identity: SYSTEM."
   Write-Host "KING AI Control Center installed machine-wide under $clientRoot and added to Desktop + Start Menu."
   Write-Host "Visual client URL: http://127.0.0.1:18889/ui/"
-  Write-Host "Set the model API key in $modelKeyFile (Administrators only), then restart the KINGAIBOT scheduled task."
+  Write-Host "Provider catalog: $root\providers.catalog.json"
+  Write-Host "API keys: create/edit ENVIRONMENT_VARIABLE.txt files under $providerSecrets, then restart the KINGAIBOT scheduled task."
 } finally {
   Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
