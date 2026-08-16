@@ -2,10 +2,11 @@
 
 ## English
 
-KINGAIBOT v1.4.0 is the secure, durable and model-agnostic digital-employee execution platform for the KING AI intelligent-lifeform system. Documentation is organized around product definition, v1.4 governance/replay safety, platform capabilities, operations, architecture, security, protocols and controlled evolution.
+KINGAIBOT is the secure, durable and model-agnostic digital-employee execution platform for the KING AI intelligent-lifeform system. The v1.4 governance/replay-safety baseline now also ships a cross-platform visual client layer for Windows, macOS and Linux while preserving the same governed runtime for server, edge and IoT deployments.
 
 Start here:
 
+- [Visual Clients & Platform Installation](VISUAL-CLIENTS.md)
 - [v1.4 Governance & Replay-Safety](V14_GOVERNANCE_STATUS.md)
 - [Product Definition](PRODUCT.md)
 - [Platform Control Plane](PLATFORM.md)
@@ -33,10 +34,11 @@ Contact: vip@kingai.work
 
 ## 中文
 
-KINGAIBOT v1.4.0 是 KING AI 智慧生命体面向数字员工、私有部署和企业自动运营的安全、持久、模型可替换执行平台。文档以 v1.4 治理与防重复执行为当前基线，并继续覆盖产品、平台能力、运维、架构、安全、协议和受控进化。
+KINGAIBOT 是 KING AI 智慧生命体面向数字员工、私有部署和企业自动运营的安全、持久、模型可替换执行平台。在 v1.4 治理与防重复执行基线之上，现统一增加 Windows、macOS、Linux 可视化客户端，同时 Server、Edge、IoT 继续复用同一个受治理 Runtime。
 
 建议入口：
 
+- [可视化客户端与多平台安装](VISUAL-CLIENTS.md)
 - [v1.4 治理与防重复执行](V14_GOVERNANCE_STATUS.md)
 - [产品定义](PRODUCT.md)
 - [平台控制平面](PLATFORM.md)
