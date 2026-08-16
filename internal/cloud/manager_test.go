@@ -21,8 +21,8 @@ func TestValidateBaseURLPinsKINGAI(t *testing.T) {
 
 func TestPolicyCanOnlyTighten(t *testing.T) {
 	cfg := &config.Config{
-		Runtime: config.Runtime{MaxSteps: 12, WorkerCount: 8, TaskTimeoutSeconds: 900},
-		Security: config.Security{DefaultToolPolicy: "ask", ToolPolicies: map[string]string{"shell": "deny", "http": "allow"}},
+		Runtime:   config.Runtime{MaxSteps: 12, WorkerCount: 8, TaskTimeoutSeconds: 900},
+		Security:  config.Security{DefaultToolPolicy: "ask", ToolPolicies: map[string]string{"shell": "deny", "http": "allow"}},
 		Providers: []config.Provider{{Name: "OpenAI", Enabled: true}, {Name: "Local", Enabled: true}},
 	}
 	ApplyRestrictions(cfg, Policy{Version: 3, DisabledProviders: []string{"OpenAI"}, MaxSteps: 6, MaxWorkerCount: 2, MaxTaskTimeoutSeconds: 300, DefaultToolPolicy: "allow", ToolPolicies: map[string]string{"shell": "allow", "http": "deny"}})
