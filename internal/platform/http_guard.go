@@ -99,8 +99,9 @@ func nativeAdapterPath(path string) bool {
 //
 // Native provider webhooks use a separate high-volume coarse limiter because
 // many independent end-users legitimately share a small set of provider egress
-// IPs. Their strict per-user quota is enforced only after native signature
-// verification, keyed by channel + pseudonymous sender identity.
+// IPs. The limiter key also includes the concrete adapter path, so one busy
+// Channel cannot consume the coarse ingress budget of another Channel that
+// happens to share the same provider source IP.
 func HTTPGuard(next http.Handler) http.Handler {
 	defaultLimiter := newRootLimiter()
 	adapterLimiter := newRootLimiterWith(adapterRootRateLimit, adapterRateMaxEntries)
@@ -111,11 +112,13 @@ func HTTPGuard(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
 		if !probePath(r.URL.Path) {
+			key := remoteKey(r)
 			limiter := defaultLimiter
 			if nativeAdapterPath(r.URL.Path) {
 				limiter = adapterLimiter
+				key += ":" + r.URL.Path
 			}
-			if !limiter.allow(remoteKey(r), time.Now().UTC()) {
+			if !limiter.allow(key, time.Now().UTC()) {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.Header().Set("Retry-After", "60")
 				w.WriteHeader(http.StatusTooManyRequests)
