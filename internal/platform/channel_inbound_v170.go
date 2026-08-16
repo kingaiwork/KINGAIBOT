@@ -98,66 +98,71 @@ func (g *channelGatewayV170) httpNativeInbound(w http.ResponseWriter, r *http.Re
 }
 
 func (g *channelGatewayV170) acceptNative(w http.ResponseWriter, channel *Channel, in nativeInbound, ack func()) {
+	status, payload, accepted := g.acceptNativeResult(channel, in)
+	if accepted {
+		ack()
+		return
+	}
+	writePlatformJSON(w, status, payload)
+}
+
+func (g *channelGatewayV170) acceptNativeResult(channel *Channel, in nativeInbound) (int, map[string]any, bool) {
 	m := g.manager
 	if in.EventID == "" || len(in.EventID) > 256 || in.Sender == "" || len(in.Sender) > 512 || in.Target == "" || len(in.Target) > 512 {
-		writePlatformJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_native_event"})
-		return
+		return http.StatusBadRequest, map[string]any{"error": "invalid_native_event"}, false
 	}
 	text, err := cleanText(in.Text, maxPromptLen, "text")
 	if err != nil {
-		writePlatformJSON(w, http.StatusBadRequest, map[string]any{"error": "unsupported_or_empty_message"})
-		return
+		return http.StatusBadRequest, map[string]any{"error": "unsupported_or_empty_message"}, false
 	}
 	if !senderAllowed(channel.AllowedSenders, in.Sender) {
-		writePlatformJSON(w, http.StatusForbidden, map[string]any{"error": "sender_not_allowed"})
-		return
+		return http.StatusForbidden, map[string]any{"error": "sender_not_allowed"}, false
 	}
 	route, err := g.route(channel, in.Sender, in.Target, in.Thread)
 	if err != nil {
-		platformProblem(w, err)
-		return
+		return http.StatusInternalServerError, map[string]any{"error": "route_persistence_failed"}, false
 	}
 	pseudo := pseudonymousSender(in.Sender, route.ID)
 	receipt, duplicate, err := m.reserveInboundSafe(channel, in.EventID, pseudo, map[string]any{"native_kind": normalizeChannelKind(channel.Kind), "route_id": route.ID})
 	if err != nil {
-		platformProblem(w, err)
-		return
+		return http.StatusInternalServerError, map[string]any{"error": "receipt_reservation_failed"}, false
 	}
 	if duplicate {
-		if receipt.TaskID != "" {
-			_, _ = g.ensurePending(channel, route, receipt.TaskID, in.Secrets)
-			if receipt.Status != "accepted" {
-				_ = m.finishInbound(receipt, route.SessionID, receipt.TaskID, "accepted", "")
-			}
-			ack()
-			return
+		if receipt.TaskID == "" {
+			return http.StatusConflict, map[string]any{"error": "inbound_reconciliation_required", "receipt_id": receipt.ID}, false
 		}
-		writePlatformJSON(w, http.StatusConflict, map[string]any{"error": "inbound_reconciliation_required", "receipt_id": receipt.ID})
-		return
+		if receipt.Status != "accepted" {
+			if err := m.audit("channel.native.inbound.accepted", map[string]any{"channel_id": channel.ID, "receipt_id": receipt.ID, "route_id": route.ID, "session_id": route.SessionID, "task_id": receipt.TaskID, "kind": normalizeChannelKind(channel.Kind), "sender_sha256_96": senderDigest(in.Sender), "recovered": true}); err != nil {
+				return http.StatusInternalServerError, map[string]any{"error": "audit_failed"}, false
+			}
+			if err := m.finishInbound(receipt, route.SessionID, receipt.TaskID, "accepted", ""); err != nil {
+				return http.StatusInternalServerError, map[string]any{"error": "receipt_acceptance_persistence_failed"}, false
+			}
+		}
+		if _, err := g.ensurePending(channel, route, receipt.TaskID, in.Secrets); err != nil {
+			return http.StatusInternalServerError, map[string]any{"error": "outbound_queue_persistence_failed"}, false
+		}
+		return http.StatusOK, map[string]any{"ok": true, "duplicate": true}, true
 	}
+
 	created, err := m.SendSessionV14(route.SessionID, text)
 	if err != nil {
 		_ = m.finishInbound(receipt, route.SessionID, "", "failed", memorySafeError(err))
-		platformProblem(w, err)
-		return
+		return http.StatusInternalServerError, map[string]any{"error": "task_submission_failed"}, false
 	}
 	if err := m.finishInbound(receipt, route.SessionID, created.ID, "task_created", ""); err != nil {
-		writePlatformJSON(w, http.StatusInternalServerError, map[string]any{"error": "receipt_task_link_failed"})
-		return
-	}
-	if _, err := g.ensurePending(channel, route, created.ID, in.Secrets); err != nil {
-		writePlatformJSON(w, http.StatusInternalServerError, map[string]any{"error": "outbound_queue_persistence_failed"})
-		return
+		return http.StatusInternalServerError, map[string]any{"error": "receipt_task_link_failed"}, false
 	}
 	if err := m.audit("channel.native.inbound.accepted", map[string]any{"channel_id": channel.ID, "receipt_id": receipt.ID, "route_id": route.ID, "session_id": route.SessionID, "task_id": created.ID, "kind": normalizeChannelKind(channel.Kind), "sender_sha256_96": senderDigest(in.Sender)}); err != nil {
-		writePlatformJSON(w, http.StatusInternalServerError, map[string]any{"error": "audit_failed"})
-		return
+		return http.StatusInternalServerError, map[string]any{"error": "audit_failed"}, false
 	}
 	if err := m.finishInbound(receipt, route.SessionID, created.ID, "accepted", ""); err != nil {
-		writePlatformJSON(w, http.StatusInternalServerError, map[string]any{"error": "receipt_acceptance_persistence_failed"})
-		return
+		return http.StatusInternalServerError, map[string]any{"error": "receipt_acceptance_persistence_failed"}, false
 	}
-	ack()
+	if _, err := g.ensurePending(channel, route, created.ID, in.Secrets); err != nil {
+		return http.StatusInternalServerError, map[string]any{"error": "outbound_queue_persistence_failed"}, false
+	}
+	return http.StatusOK, map[string]any{"ok": true, "duplicate": false}, true
 }
 
 func (g *channelGatewayV170) handleTelegram(w http.ResponseWriter, r *http.Request, channel *Channel, body []byte) {
@@ -266,9 +271,6 @@ func (g *channelGatewayV170) handleSlack(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	thread := e.Event.Thread
-	if thread == "" {
-		thread = e.Event.TS
-	}
 	g.acceptNative(w, channel, nativeInbound{EventID: e.EventID, Sender: e.Event.User, Target: e.Event.Channel, Thread: thread, Text: e.Event.Text}, func() {
 		writePlatformJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
@@ -398,6 +400,7 @@ func (g *channelGatewayV170) handleWhatsApp(w http.ResponseWriter, r *http.Reque
 		writePlatformJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
 	}
+	accepted := 0
 	for _, entry := range payload.Entry {
 		for _, change := range entry.Changes {
 			for _, msg := range change.Value.Messages {
@@ -411,14 +414,17 @@ func (g *channelGatewayV170) handleWhatsApp(w http.ResponseWriter, r *http.Reque
 						text = msg.Interactive.ListReply.Title
 					}
 				}
-				if msg.ID != "" && msg.From != "" && strings.TrimSpace(text) != "" {
-					g.acceptNative(w, channel, nativeInbound{EventID: msg.ID, Sender: msg.From, Target: msg.From, Text: text}, func() {
-						writePlatformJSON(w, http.StatusOK, map[string]any{"ok": true})
-					})
+				if msg.ID == "" || msg.From == "" || strings.TrimSpace(text) == "" {
+					continue
+				}
+				status, response, ok := g.acceptNativeResult(channel, nativeInbound{EventID: msg.ID, Sender: msg.From, Target: msg.From, Text: text})
+				if !ok {
+					writePlatformJSON(w, status, response)
 					return
 				}
+				accepted++
 			}
 		}
 	}
-	writePlatformJSON(w, http.StatusOK, map[string]any{"ok": true, "ignored": true})
+	writePlatformJSON(w, http.StatusOK, map[string]any{"ok": true, "accepted": accepted, "ignored": accepted == 0})
 }
