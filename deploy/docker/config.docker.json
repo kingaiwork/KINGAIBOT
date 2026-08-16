@@ -91,7 +91,7 @@
     "mcp_servers": [],
     "a2a_peers": []
   },
-  "version": "1.4.0",
+  "version": "1.6.1",
   "memory": {
     "enabled": true,
     "max_records": 5000,
