@@ -65,7 +65,7 @@ try {
   $bin = Join-Path $root "bin"
   $data = Join-Path $root "data"
   $workspace = Join-Path $data "workspace"
-  $clientRoot = Join-Path $env:LOCALAPPDATA "KINGAI"
+  $clientRoot = Join-Path $root "client"
   $clientBin = Join-Path $clientRoot "bin"
   $taskName = "KINGAIBOT"
   $updateTask = "KINGAIBOT Update"
@@ -112,6 +112,7 @@ try {
 
   & icacls.exe $root /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)RX" | Out-Null
   & icacls.exe $data /grant:r "*S-1-5-19:(OI)(CI)M" | Out-Null
+  & icacls.exe $clientRoot /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
   foreach ($tokenFile in @($adminTokenFile,$mcpTokenFile,$a2aTokenFile,$modelKeyFile)) {
     & icacls.exe $tokenFile /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" "*S-1-5-19:R" | Out-Null
   }
@@ -148,7 +149,7 @@ exit `$LASTEXITCODE
 
   Write-Host "KINGAIBOT installed to $root"
   Write-Host "Runtime identity: NT AUTHORITY\LOCAL SERVICE (not Administrator/SYSTEM)."
-  Write-Host "KING AI Control Center installed to $clientRoot and added to Desktop + Start Menu."
+  Write-Host "KING AI Control Center installed machine-wide under $clientRoot and added to Desktop + Start Menu."
   Write-Host "Visual client URL: http://127.0.0.1:18889/ui/"
   Write-Host "Set the model API key in $modelKeyFile (Administrators only), then restart the KINGAIBOT scheduled task."
 } finally {
