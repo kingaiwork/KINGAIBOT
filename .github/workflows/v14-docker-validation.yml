@@ -20,3 +20,12 @@ jobs:
         run: docker build -f deploy/docker/Dockerfile.worker -t kingaibot-worker:test .
       - name: Build console image
         run: docker build -f deploy/docker/Dockerfile.console -t kingaibot-console:test .
+      - name: Assert container versions match VERSION
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(tr -d '\r\n' < VERSION)"
+          test -n "$expected"
+          test "$(docker run --rm kingaibot-server:test -version)" = "$expected"
+          test "$(docker run --rm kingaibot-worker:test -version)" = "$expected"
+          test "$(docker run --rm kingaibot-console:test -version)" = "$expected"
