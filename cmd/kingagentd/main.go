@@ -33,7 +33,7 @@ import (
 	"github.com/kingaiwork/KINGAIBOT/internal/workgraph"
 )
 
-var version = "1.6.1"
+var version = "1.7.0"
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "configuration file")
@@ -149,6 +149,7 @@ func main() {
 	identityAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, pm.IdentityHandler())
 	inboundAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, pm.InboundAdminHandler())
 	statusScoped := pm.ScopedAuthHandler(cfg.Server.AdminTokenEnv, pm.StatusHandler())
+	channelGatewayAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, pm.ChannelGatewayAdminHandlerV170())
 	root.Handle("/v1/platform/identities", identityAdmin)
 	root.Handle("/v1/platform/identities/", identityAdmin)
 	root.Handle("/v1/platform/access-keys", identityAdmin)
@@ -157,6 +158,7 @@ func main() {
 	root.Handle("/v1/platform/inbound-receipts/", inboundAdmin)
 	root.Handle("/v1/platform/status", statusScoped)
 	root.Handle("/v1/platform/metrics", statusScoped)
+	root.Handle("/v1/platform/channel-gateway/", channelGatewayAdmin)
 	root.Handle("/v1/platform/", platformScoped)
 
 	// Scoped readers can see only approved knowledge. Proposal creation,
@@ -212,11 +214,12 @@ func main() {
 	orchestrationAdmin := pm.AdminAuthHandler(cfg.Server.AdminTokenEnv, orchestrator.Handler())
 	root.Handle("/v1/orchestration/", orchestrationAdmin)
 
-	// Channel-specific inbound authentication, durable Session submission and
-	// conservative retry/reconciliation semantics are enforced in the v1.6.1
-	// gateway. Optional HMAC body signing is activated by provisioning
-	// <BEARER_TOKEN_ENV>_SIGNING_SECRET for a channel.
-	root.Handle("/v1/inbound/", pm.InboundHandlerV161())
+	// v1.7 keeps the normalized signed gateway and adds native Telegram, Slack,
+	// Discord and WhatsApp Cloud ingress. Native replies are durable and do not
+	// expose platform sender identifiers in generic Session/Task/audit state.
+	channelGateway := pm.InboundHandlerV170()
+	root.Handle("/v1/inbound/", channelGateway)
+	root.Handle("/v1/adapters/", channelGateway)
 	root.Handle("/", coreHandler)
 
 	// Every daemon route, including specialized platform/channel/admin surfaces,
@@ -224,7 +227,7 @@ func main() {
 	// Health probes are deliberately quota-exempt inside HTTPGuard.
 	srv := &http.Server{Addr: cfg.Server.Listen, Handler: platform.HTTPGuard(root), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Duration(cfg.Runtime.RequestTimeoutSeconds+15) * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
 	go func() {
-		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "v1.6.1-hardened", "knowledge", "safe", "cognition", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled")
+		slog.Info("KINGAIBOT started", "listen", cfg.Server.Listen, "version", version, "platform", "v1.7.0-unified-channel-gateway", "knowledge", "safe", "cognition", "enabled", "cluster", "enabled", "evolution_control", "enabled", "workgraph", "enabled", "authority", "enabled", "orchestration", "enabled", "native_channels", "telegram,slack,discord,whatsapp")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server", "error", err)
 			os.Exit(1)
