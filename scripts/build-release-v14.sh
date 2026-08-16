@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${VERSION:-${GITHUB_REF_NAME:-1.5.0}}"
+VERSION="${VERSION:-${GITHUB_REF_NAME:-1.6.0}}"
 VERSION="${VERSION#v}"
 MIN_GO_VERSION="${KINGAGENT_MIN_RELEASE_GO:-1.26.6}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -66,12 +66,16 @@ build_target() {
   done
 
   cp "$ROOT/configs/config.example.json" "$stage/config.example.json"
+  cp "$ROOT/configs/providers.catalog.json" "$stage/providers.catalog.json"
   cp "$ROOT/README.md" "$stage/README.md"
   cp "$ROOT/LICENSE-COMMERCIAL.txt" "$stage/LICENSE-COMMERCIAL.txt"
   cp "$ROOT/scripts/update.sh" "$stage/update.sh"
   cp "$ROOT/scripts/update.ps1" "$stage/update.ps1"
+  [[ "$goos" == "darwin" && -f "$ROOT/scripts/install-macos-system.sh" ]] && cp "$ROOT/scripts/install-macos-system.sh" "$stage/install-macos-system.sh"
   [[ -f "$ROOT/docs/PLATFORM.md" ]] && cp "$ROOT/docs/PLATFORM.md" "$stage/PLATFORM.md"
+  [[ -f "$ROOT/docs/COGNITIVE-RUNTIME.md" ]] && cp "$ROOT/docs/COGNITIVE-RUNTIME.md" "$stage/COGNITIVE-RUNTIME.md"
   chmod 0755 "$stage/update.sh"
+  [[ -f "$stage/install-macos-system.sh" ]] && chmod 0755 "$stage/install-macos-system.sh"
   normalize_mtime "$stage"
 
   # Canonical asset names intentionally omit the version. GitHub Release tags
@@ -115,6 +119,9 @@ cat > "$DIST/RELEASE-MANIFEST.json" <<EOF
   "binaries": ["kingagentd", "kingagent", "kingworker", "kingconsole", "kingdesktop"],
   "visual_client": "kingdesktop",
   "control_center": "http://127.0.0.1:18889/ui/",
+  "cognitive_runtime": true,
+  "provider_catalog": "providers.catalog.json",
+  "macos_system_installer": "install-macos-system.sh",
   "targets": ["linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64", "windows/arm64"]
 }
 EOF

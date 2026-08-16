@@ -24,7 +24,18 @@ fi
 
 tar -xzf "$TMP/$ASSET" -C "$TMP"
 for required in kingagentd kingagent kingworker kingconsole kingdesktop; do [[ -f "$TMP/$required" ]] || { echo "Release is missing $required" >&2; exit 4; }; done
-if [[ "$OS" == linux ]]; then BIN_DIR=/usr/local/bin; RESTART_CMD=(systemctl restart kingagent); else PREFIX="${HOME}/.local/kingagent"; BIN_DIR="$PREFIX/bin"; RESTART_CMD=(launchctl kickstart -k "gui/$(id -u)/com.kingai.agentos"); fi
+if [[ "$OS" == linux ]]; then
+  BIN_DIR=/usr/local/bin
+  RESTART_CMD=(systemctl restart kingagent)
+else
+  PREFIX="${KINGAGENT_INSTALL_ROOT:-${HOME}/.local/kingagent}"
+  BIN_DIR="$PREFIX/bin"
+  if [[ -n "${KINGAGENT_LAUNCHD_DOMAIN:-}" ]]; then
+    RESTART_CMD=(launchctl kickstart -k "$KINGAGENT_LAUNCHD_DOMAIN")
+  else
+    RESTART_CMD=(launchctl kickstart -k "gui/$(id -u)/com.kingai.agentos")
+  fi
+fi
 NEW="$($TMP/kingagentd -version)"; OLD="$($BIN_DIR/kingagentd -version 2>/dev/null || echo none)"; [[ "$NEW" != "$OLD" ]] || exit 0
 if [[ "$OLD" != "none" && "${KINGAGENT_ALLOW_DOWNGRADE:-0}" != "1" ]]; then set +e; semver_gt "$NEW" "$OLD"; cmp_rc=$?; set -e; if [[ $cmp_rc -eq 2 ]]; then echo "Cannot safely compare versions ($OLD -> $NEW); refusing unattended update." >&2; exit 5; elif [[ $cmp_rc -ne 0 ]]; then echo "Refusing downgrade or non-increasing version: $OLD -> $NEW" >&2; exit 5; fi; fi
 WAS_READY=0; if curl -fsS --max-time 5 http://127.0.0.1:18888/readyz >/dev/null 2>&1; then WAS_READY=1; fi

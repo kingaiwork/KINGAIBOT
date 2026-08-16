@@ -59,6 +59,10 @@ func main() {
 			status = "denied"
 		}
 		err = client.print("POST", "/v1/approvals/"+url.PathEscape(args[1]), map[string]any{"status": status})
+	case "cognition":
+		err = client.print("GET", "/v1/cognition/status", nil)
+	case "reflect":
+		err = client.print("POST", "/v1/cognition/reflect", map[string]any{})
 	case "evolution":
 		err = client.print("GET", "/v1/evolution/proposals", nil)
 	default:
@@ -81,6 +85,8 @@ Commands:
   approvals
   approve <approval-id>
   deny <approval-id>
+  cognition
+  reflect
   evolution
 
 Environment:
