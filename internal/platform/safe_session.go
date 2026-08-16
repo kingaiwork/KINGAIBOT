@@ -52,10 +52,10 @@ func (m *Manager) SendSessionDurable(id, text string) (*task.Task, error) {
 		return nil, fmt.Errorf("session task blocked because authorization audit failed: %w", err)
 	}
 	created, err := m.rt.Create(prompt, map[string]any{
-		"source":            "session",
-		"session_id":        id,
-		"agent_id":          session.AgentID,
-		"channel":           session.Channel,
+		"source":           "session",
+		"session_id":       id,
+		"agent_id":         session.AgentID,
+		"channel":          session.Channel,
 		"sender_sha256_96": senderDigest(session.Sender),
 	})
 	if err != nil {
