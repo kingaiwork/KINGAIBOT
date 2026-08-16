@@ -43,7 +43,7 @@ func prepareCloud(cfg *config.Config, agentVersion string) (*cloud.Manager, clou
 		Environment:         strings.TrimSpace(os.Getenv("KINGAI_CLOUD_ENVIRONMENT")),
 		NodeClass:           strings.TrimSpace(os.Getenv("KINGAI_NODE_CLASS")),
 		Provider:            strings.TrimSpace(os.Getenv("KINGAI_NODE_PROVIDER")),
-		Region:               strings.TrimSpace(os.Getenv("KINGAI_NODE_REGION")),
+		Region:              strings.TrimSpace(os.Getenv("KINGAI_NODE_REGION")),
 		HeartbeatInterval:   envSeconds("KINGAI_CLOUD_HEARTBEAT_SECONDS", 60),
 		SyncInterval:        envSeconds("KINGAI_MEMORY_SYNC_SECONDS", 900),
 		SyncEnabled:         envBool("KINGAI_MEMORY_SYNC", false),
