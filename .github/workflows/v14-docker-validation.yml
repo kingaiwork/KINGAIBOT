@@ -1,4 +1,4 @@
-name: V1.4 Container Validation
+name: V1.4 Container Validation Zero-Bill
 
 on:
   pull_request:
@@ -9,17 +9,16 @@ permissions:
 
 jobs:
   docker:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, kingai-vps]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - name: Build server image
-        run: docker build -f deploy/docker/Dockerfile -t kingaibot-server:test .
-      - name: Build worker image
-        run: docker build -f deploy/docker/Dockerfile.worker -t kingaibot-worker:test .
-      - name: Build console image
-        run: docker build -f deploy/docker/Dockerfile.console -t kingaibot-console:test .
+      - name: Build server/worker/console images on VPS
+        run: |
+          docker build -f deploy/docker/Dockerfile -t kingaibot-server:test .
+          docker build -f deploy/docker/Dockerfile.worker -t kingaibot-worker:test .
+          docker build -f deploy/docker/Dockerfile.console -t kingaibot-console:test .
       - name: Assert container versions match VERSION
         shell: bash
         run: |

@@ -1,0 +1,23 @@
+{
+  "schema": "kingai.repo-zero-bill.v1",
+  "enabled": true,
+  "central_authority": "kingaiwork/KINGAIASE:config/zero-bill-policy.json",
+  "repo": "kingaiwork/KINGAIBOT",
+  "role": "agent-runtime",
+  "automatic_ci": "vps-self-hosted-only",
+  "security_scan": "vps-local-only",
+  "release_storage": "vps-local-only",
+  "container_builds": "vps-local-only",
+  "paid_ai_api": "forbidden",
+  "github_hosted_runner": "forbidden",
+  "github_codeql_ghas": "forbidden-as-automatic-dependency",
+  "github_actions_artifact_storage": "forbidden",
+  "automatic_public_release_upload": "forbidden",
+  "native_macos_windows_cloud_ci": "forbidden",
+  "cross_compile_on_vps": true,
+  "vps_paths": {
+    "builds": "/srv/kingai/builds/KINGAIBOT",
+    "qa": "/srv/kingai/qa/KINGAIBOT",
+    "releases": "/srv/kingai/releases/KINGAIBOT"
+  }
+}

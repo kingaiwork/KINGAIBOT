@@ -1,4 +1,4 @@
-name: CI
+name: CI Zero-Bill
 on:
   push:
     branches: [main]
@@ -12,94 +12,60 @@ permissions:
   contents: read
 
 jobs:
-  security-test:
-    runs-on: ubuntu-latest
+  security-test-build:
+    runs-on: [self-hosted, linux, x64, kingai-vps]
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: '1.26.6'
-          cache: true
-      - name: Format check
+
+      - name: Require owned VPS toolchain
         shell: bash
         run: |
           set -euo pipefail
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            echo "The following Go files require gofmt:"
-            printf '%s\n' "$unformatted"
+          go version
+          node --version || true
+          docker --version
+          version="$(go version | awk '{print $3}' | sed 's/^go//')"
+          [[ "$version" == 1.26.* ]] || { echo "Go 1.26.x is required on the VPS runner; got $version" >&2; exit 1; }
+
+      - name: Zero-bill dependency guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RIn --exclude-dir=.git --exclude='ci.yml' -E 'runs-on:[[:space:]]*(ubuntu|windows|macos)|actions/upload-artifact|github/codeql-action|OPENAI_API_KEY|ANTHROPIC_API_KEY|DEEPSEEK_API_KEY|GEMINI_API_KEY' .github .kingai 2>/dev/null; then
+            echo 'ZERO-BILL policy violation found.' >&2
             exit 1
           fi
-      - name: Vet
-        run: go vet ./...
-      - name: Third-party provenance inventory
-        run: bash scripts/check-third-party-inventory.sh
-      - name: Govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
-          govulncheck ./...
-      - name: Test with race detector
-        run: go test -race -count=1 ./...
-      - name: Shell syntax
-        run: for f in scripts/*.sh; do bash -n "$f"; done
-      - name: Release guard requires production Go
-        run: KINGAGENT_MIN_RELEASE_GO=1.26.6 VERSION=ci SOURCE_DATE_EPOCH=315532800 ./scripts/build-release.sh
 
-  macos-native:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: '1.26.6'
-          cache: true
-      - name: Native test and build
+      - name: Format, vet, provenance and vulnerability checks
+        shell: bash
         run: |
-          go test -count=1 ./...
-          go build ./cmd/kingagentd
-          go build ./cmd/kingagent
+          set -euo pipefail
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          bash scripts/check-third-party-inventory.sh
+          if ! command -v govulncheck >/dev/null 2>&1; then
+            go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          fi
+          govulncheck ./...
+          go test -race -count=1 ./...
           for f in scripts/*.sh; do bash -n "$f"; done
 
-  windows-native:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: '1.26.6'
-          cache: true
-      - name: Native test and build
-        shell: pwsh
+      - name: Build Linux and cross-compile Windows/macOS on VPS
+        shell: bash
         run: |
-          go test -count=1 ./...
-          go build ./cmd/kingagentd
-          go build ./cmd/kingagent
-      - name: Parse PowerShell installer and updater
-        shell: pwsh
-        run: |
-          $failed = $false
-          foreach ($file in @('scripts/install.ps1','scripts/update.ps1')) {
-            $tokens = $null
-            $parseErrors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$parseErrors) | Out-Null
-            if ($parseErrors.Count -gt 0) {
-              $parseErrors | ForEach-Object { Write-Error "${file}: $($_.Message)" }
-              $failed = $true
-            }
-          }
-          if ($failed) { exit 1 }
+          set -euo pipefail
+          out="/srv/kingai/builds/KINGAIBOT/${GITHUB_SHA}"
+          mkdir -p "$out"
+          KINGAGENT_MIN_RELEASE_GO=1.26.6 VERSION=ci SOURCE_DATE_EPOCH=315532800 ./scripts/build-release.sh
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$out/kingagent-linux-amd64" ./cmd/kingagent
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$out/kingagent-windows-amd64.exe" ./cmd/kingagent
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o "$out/kingagent-darwin-amd64" ./cmd/kingagent
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o "$out/kingagent-darwin-arm64" ./cmd/kingagent
+          sha256sum "$out"/* > "$out/SHA256SUMS"
+          echo "Build evidence retained on owned VPS: $out"
 
-  docker-build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Build hardened container
+      - name: Build hardened container locally
         run: docker build --pull -f deploy/docker/Dockerfile .

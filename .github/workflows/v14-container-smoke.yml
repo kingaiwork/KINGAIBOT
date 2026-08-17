@@ -1,4 +1,4 @@
-name: V1.4 Container Smoke
+name: V1.4 Container Smoke Zero-Bill
 
 on:
   pull_request:
@@ -13,12 +13,12 @@ permissions:
 
 jobs:
   smoke:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, kingai-vps]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - name: Build worker and console images
+      - name: Build worker and console images on VPS
         run: |
           docker build -f deploy/docker/Dockerfile.worker -t kingaibot-worker:smoke .
           docker build -f deploy/docker/Dockerfile.console -t kingaibot-console:smoke .
@@ -45,18 +45,13 @@ jobs:
           cleanup() { docker rm -f kingconsole-smoke >/dev/null 2>&1 || true; }
           trap cleanup EXIT
           for attempt in 1 2 3 4 5; do
-            if curl -fsS http://127.0.0.1:18889/ui/ | grep -q 'KINGAIBOT Control Center'; then
-              exit 0
-            fi
+            if curl -fsS http://127.0.0.1:18889/ui/ | grep -q 'KINGAIBOT Control Center'; then exit 0; fi
             if ! docker inspect -f '{{.State.Running}}' kingconsole-smoke 2>/dev/null | grep -qx true; then
-              echo "kingconsole exited before becoming ready" >&2
               docker inspect kingconsole-smoke || true
               docker logs kingconsole-smoke || true
               exit 1
             fi
             sleep 1
           done
-          echo "kingconsole stayed running but did not become ready" >&2
-          docker inspect kingconsole-smoke || true
           docker logs kingconsole-smoke || true
           exit 1
