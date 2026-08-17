@@ -1,29 +1,39 @@
-name: CodeQL
+name: Local Security Zero-Bill
 on:
   push:
     branches: [main]
   pull_request:
   schedule:
     - cron: '17 9 * * 3'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
-  security-events: write
-  packages: read
   contents: read
 
 jobs:
   analyze:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, kingai-vps]
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
-        with:
-          languages: go
-      - uses: github/codeql-action/autobuild@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
-      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
+      - name: Local Go security gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./...
+          go vet ./...
+          if ! command -v govulncheck >/dev/null 2>&1; then
+            go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          fi
+          govulncheck ./...
+          if grep -RIn --exclude-dir=.git --exclude='codeql.yml' -E '(OPENAI_API_KEY|ANTHROPIC_API_KEY|DEEPSEEK_API_KEY|GEMINI_API_KEY|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY)' .; then
+            echo 'Potential paid-provider key or private key marker found.' >&2
+            exit 1
+          fi
+      - name: Explain security mode
+        run: echo 'CodeQL/GHAS is not an automatic dependency; security scanning runs on the owned VPS.'
