@@ -1,4 +1,4 @@
-name: V1.4 Full Validation
+name: V1.4 Full Validation Zero-Bill
 
 on:
   pull_request:
@@ -12,25 +12,22 @@ permissions:
   contents: read
 
 jobs:
-  full-linux:
-    runs-on: ubuntu-latest
+  full-linux-and-cross-compile:
+    runs-on: [self-hosted, linux, x64, kingai-vps]
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
-        with:
-          go-version: '1.26.6'
-          cache: true
-      - name: Format
-        run: test -z "$(gofmt -l .)"
-      - name: Vet
-        run: go vet ./...
-      - name: Unit and race tests
-        run: go test -race -count=1 ./...
-      - name: Vulnerability scan
+      - name: Format, vet, tests and vulnerability scan
+        shell: bash
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          set -euo pipefail
+          go version
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -race -count=1 ./...
+          if ! command -v govulncheck >/dev/null 2>&1; then go install golang.org/x/vuln/cmd/govulncheck@v1.6.0; fi
           govulncheck ./...
       - name: Build all local binaries
         run: |
@@ -38,6 +35,19 @@ jobs:
           go build ./cmd/kingagent
           go build ./cmd/kingworker
           go build ./cmd/kingconsole
+      - name: Cross-compile Windows and macOS without hosted runners
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="/srv/kingai/qa/KINGAIBOT/${GITHUB_SHA}/cross"
+          mkdir -p "$out"
+          for cmd in kingagentd kingagent kingworker kingconsole; do
+            GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$out/${cmd}-windows-amd64.exe" "./cmd/${cmd}"
+            GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o "$out/${cmd}-darwin-amd64" "./cmd/${cmd}"
+            GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o "$out/${cmd}-darwin-arm64" "./cmd/${cmd}"
+          done
+          sha256sum "$out"/* > "$out/SHA256SUMS"
+          echo 'Native macOS/Windows runtime execution is intentionally not delegated to paid cloud runners; only cross-compilation is automatic.'
       - name: Build six-target release set
         env:
           VERSION: 1.4.0-ci
@@ -50,38 +60,6 @@ jobs:
           test -f dist-v14/RELEASE-MANIFEST.json
           test "$(find dist-v14 -maxdepth 1 -name 'kingaibot_*.tar.gz' | wc -l)" -eq 4
           test "$(find dist-v14 -maxdepth 1 -name 'kingaibot_*.zip' | wc -l)" -eq 2
-
-  native-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
-        with:
-          go-version: '1.26.6'
-          cache: true
-      - run: go test -count=1 ./...
-      - run: |
-          go build ./cmd/kingagentd
-          go build ./cmd/kingagent
-          go build ./cmd/kingworker
-          go build ./cmd/kingconsole
-
-  native-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
-        with:
-          go-version: '1.26.6'
-          cache: true
-      - shell: pwsh
-        run: |
-          go test -count=1 ./...
-          go build ./cmd/kingagentd
-          go build ./cmd/kingagent
-          go build ./cmd/kingworker
-          go build ./cmd/kingconsole
+          out="/srv/kingai/qa/KINGAIBOT/${GITHUB_SHA}/release"
+          mkdir -p "$out"
+          cp -a dist-v14/. "$out/"
