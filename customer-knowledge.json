@@ -1,8 +1,0 @@
-{
-  "schema":"kingai.customer-knowledge-source.v1",
-  "project_id":"kingaibot",
-  "visibility":"public",
-  "customer_safe_paths":["README.md","docs/CHANNEL-GATEWAY.md","docs/SECURITY.md","docs/ARCHITECTURE.md","docs/ROADMAP.md"],
-  "publish_policy":"Only public runtime capabilities, supported channels, model-neutral architecture and governed-execution claims explicitly documented here may become customer answers. Never expose credentials, transport secrets or admin-only implementation details.",
-  "private_repository_access":false
-}

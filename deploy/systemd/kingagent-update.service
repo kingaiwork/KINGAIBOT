@@ -1,8 +1,0 @@
-[Unit]
-Description=KINGAIBOT signed update check
-After=network-online.target
-
-[Service]
-Type=oneshot
-EnvironmentFile=/etc/kingagent/update.env
-ExecStart=/usr/local/lib/kingagent/update.sh

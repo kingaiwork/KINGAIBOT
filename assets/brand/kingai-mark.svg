@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
-  <title id="title">KING AI</title>
-  <desc id="desc">Unified KING AI crown and intelligence-node emblem.</desc>
-  <defs><linearGradient id="gold" x1="12" y1="8" x2="52" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#F0D77A"/><stop offset="0.42" stop-color="#D4AF37"/><stop offset="1" stop-color="#A87916"/></linearGradient><mask id="cut"><rect width="64" height="64" fill="white"/><path d="M32 24v23M27.5 30.5l-6 6v8M22.5 27l-7 7v7M36.5 30.5l6 6v8M41.5 27l7 7v7" fill="none" stroke="black" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="32" cy="47" r="3.2" fill="black"/><circle cx="21.5" cy="44.5" r="2.6" fill="black"/><circle cx="15.5" cy="41" r="2.6" fill="black"/><circle cx="42.5" cy="44.5" r="2.6" fill="black"/><circle cx="48.5" cy="41" r="2.6" fill="black"/></mask></defs>
-  <path d="M7 18.5 18 29 22.2 12.7 32 23.2 41.8 12.7 46 29 57 18.5 52.2 47.6 32 58 11.8 47.6Z" fill="url(#gold)" mask="url(#cut)"/>
-  <path d="M32 3.5 34.4 8.9 40 11.3 34.4 13.7 32 19.1 29.6 13.7 24 11.3 29.6 8.9Z" fill="#D4AF37"/>
-</svg>

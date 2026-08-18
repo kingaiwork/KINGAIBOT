@@ -1,9 +1,0 @@
-/data/
-/dist/
-*.log
-*.env
-.env
-.DS_Store
-/kingagent
-/kingagentd
-*.exe

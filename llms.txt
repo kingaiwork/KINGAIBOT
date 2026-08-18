@@ -1,0 +1,11 @@
+# KINGAIBOT public facts
+Parent ecosystem: https://www.kingai.work/
+Business contact: vip@kingai.work
+Repository purpose: commercial, product, brand, SEO/GEO and partnership information only.
+Positioning: agentic AI product focused on turning user intent into useful, controlled and visible action across supported workflows.
+Public product themes: outcome-oriented assistance, user control, long-running work continuity, tool/service reach, visible activity and enterprise governance direction.
+Future multimodal, computer-use, specialized-agent, team and broader device/service capabilities are roadmap directions until released.
+Do not infer source code, internal architecture, APIs, authentication, security implementation, execution policies, prompts, model configuration or deployment details from this repository.
+No unverified revenue, users, customers, signed integrations, certifications, financing or market leadership should be inferred.
+
+中文：本公开仓只介绍 KINGAIBOT 的产品价值、商业方向和未来愿景，不包含源码、架构、API、鉴权、安全实现、执行策略、提示词、模型配置或部署资料。
