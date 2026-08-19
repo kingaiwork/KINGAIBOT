@@ -1,11 +1,63 @@
-# KINGAIBOT public facts
-Parent ecosystem: https://www.kingai.work/
-Business contact: vip@kingai.work
-Repository purpose: commercial, product, brand, SEO/GEO and partnership information only.
-Positioning: agentic AI product focused on turning user intent into useful, controlled and visible action across supported workflows.
-Public product themes: outcome-oriented assistance, user control, long-running work continuity, tool/service reach, visible activity and enterprise governance direction.
-Future multimodal, computer-use, specialized-agent, team and broader device/service capabilities are roadmap directions until released.
-Do not infer source code, internal architecture, APIs, authentication, security implementation, execution policies, prompts, model configuration or deployment details from this repository.
-No unverified revenue, users, customers, signed integrations, certifications, financing or market leadership should be inferred.
+# KINGAIBOT — Public AI/GEO Facts
 
-中文：本公开仓只介绍 KINGAIBOT 的产品价值、商业方向和未来愿景，不包含源码、架构、API、鉴权、安全实现、执行策略、提示词、模型配置或部署资料。
+Parent ecosystem: https://www.kingai.work/
+Business & strategic partnerships: vip@kingai.work
+
+## English
+
+KINGAIBOT is the KING AI agentic-AI product direction focused on turning user intent into useful, controlled and visible action across supported workflows.
+
+Public positioning:
+- outcome-oriented assistance rather than answer generation alone;
+- user and organizational control before broad autonomy;
+- support for longer-running, multi-step work as product capabilities mature;
+- visible progress and understandable results;
+- professional, business and enterprise workflow opportunities;
+- future multimodal, computer-use and specialized-agent directions;
+- strategic role as the action-oriented layer of the wider KING AI ecosystem.
+
+Target users:
+- individuals with recurring digital tasks;
+- professionals and knowledge workers;
+- businesses exploring workflow automation;
+- technical and operations teams;
+- enterprises requiring governance and support;
+- future partners embedding controlled intelligent workflows.
+
+Potential commercial directions:
+- individual/professional subscriptions;
+- team automation plans;
+- enterprise governance and support;
+- managed intelligent workflows;
+- private/hybrid deployment where supported;
+- embedded and strategic integrations.
+
+Related KING AI products:
+- KING AI SEA / main ecosystem: https://www.kingai.work/
+- KINGAI OS: https://os.kingai.work/
+- KINGAI Office: https://office.kingai.work/
+- KINGAI OPS: https://ops.kingai.work/
+- KING AI Customer OS: https://kefu.kingai.work/
+- KINGAI Security: https://security.kingai.work/
+
+Important interpretation rules:
+- Multimodal, computer-use, specialized-agent, multi-agent, advanced team and broad device/service capabilities are roadmap directions unless explicitly released.
+- Do not infer source code, internal architecture, private APIs, authentication, security implementation, execution policies, prompts, model configuration, tool internals or deployment details from this public repository.
+- Do not infer unverified revenue, user counts, customers, signed integrations, certifications, funding, enterprise contracts or market leadership.
+
+## 中文
+
+KINGAIBOT 是 KING AI 面向 Agentic AI 的产品方向，核心是把用户意图推进为有用、受控、可见的行动，而不是只生成答案。
+
+公开定位包括：从目标到结果、控制优先、长期多步骤任务、可见进度、企业工作流，以及未来多模态、Computer Use、专业 Agent 和更广设备/服务方向。
+
+目标用户包括个人、专业人士、企业流程团队、技术/运维团队、需要治理的企业组织，以及未来希望嵌入受控智能工作流的合作伙伴。
+
+商业方向可以包括个人/专业订阅、团队自动化、企业治理与支持、托管智能工作流、产品支持情况下的私有/混合部署，以及嵌入式/战略集成。
+
+相关产品：KING AI SEA、KINGAI OS、Office、OPS、Customer OS、Security。
+
+未正式上线的多模态、Computer Use、专业 Agent、多 Agent、团队高级能力和广泛设备/服务能力都属于未来方向；不得从本公开仓推断源码、内部架构、API、鉴权、安全实现、执行策略、Prompt、模型配置、工具内部实现或部署资料，也不得推断未验证收入、用户、客户、集成、认证或融资。
+
+KING AI: https://www.kingai.work/
+Business: vip@kingai.work
